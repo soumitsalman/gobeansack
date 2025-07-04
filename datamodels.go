@@ -48,15 +48,23 @@ type GeneratedBean struct {
 }
 
 type Chatter struct {
-	ChatterURL  string    `db:"chatter_url"`
+	ChatterURL  string    `db:"chatter_url" bson:"chatter_url"`
 	BeanURL     string    `db:"bean_url" bson:"url"`
 	Source      string    `db:"source"`
 	Forum       string    `db:"forum" bson:"group"`
 	Collected   time.Time `db:"collected"`
 	Likes       int       `db:"likes"`
 	Comments    int       `db:"comments"`
-	Shares      int       `db:"shares"`
 	Subscribers int       `db:"subscribers"`
+}
+
+type AggregatedChatter struct {
+	URL           string    `db:"url"`            // url of the bean
+	LastCollected time.Time `db:"last_collected"` // last time some chatter was collected
+	Likes         int       `db:"total_likes"`
+	Comments      int       `db:"total_comments"`
+	Subscribers   int       `db:"total_subscribers"`
+	Shares        int       `db:"total_shares"`
 }
 
 type Source struct {

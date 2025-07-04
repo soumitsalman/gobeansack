@@ -113,17 +113,8 @@ func main() {
 		"https://llmapitest.com/",
 		"https://htmlrev.com/",
 	}
-	// // chatters := ds.QueryChatters(urls)
-	// // pp.Println(chatters)
-	// aggregateChatters := ds.QueryChatterAggregates(urls)
-	pp.Println(ds.QueryChatterAggregates(urls))
-	// updates := ds.QueryChatterUpdates(urls, 1)
-	// pp.Println(updates)
 
-	// sql := `SELECT COUNT(*) FROM chatters WHERE collected + INTERVAL 3 DAY < CURRENT_TIMESTAMP`
-	// var count int
-	// var chatters []Chatter
-	// err = ds.query.Select(&chatters, _SQL_QUERY_CHATTER_UPDATES)
-	// noerror(err)
-	pp.Println(ds.QueryChatterUpdates(urls, 1))
+	pp.Println("CHATTERS", ds.QueryChatters(urls)[:5])
+	pp.Println("AGGREGATES", ds.QueryChatterAggregates(urls))
+	pp.Println("UPDATES", ds.QueryChatterUpdates(urls, 1))
 }

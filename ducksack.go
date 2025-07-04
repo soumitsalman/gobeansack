@@ -183,18 +183,18 @@ func (ds *Ducksack) QueryBeans(urls []string) []Bean {
 // }
 
 func (ds *Ducksack) QueryChatters(urls []string) []Chatter {
-	query, args := mustIn("SELECT * FROM chatters WHERE bean_url IN (?)", urls)
+	query, args := mustIn("SELECT * FROM chatters WHERE bean_url IN (?) ORDER BY collected DESC", urls)
 	return mustSelect[Chatter](ds, query, args...)
 }
 
 const _SQL_QUERY_CHATTER_AGGREGATES = `
 SELECT 
-	bean_url,
-	MAX(collected) as collected,
-    SUM(likes) as likes, 
-    SUM(comments) as comments, 
-	SUM(subscribers) as subscribers,
-	COUNT(chatter_url) as shares
+	bean_url as url,
+	MAX(collected) as last_collected,
+    SUM(likes) as total_likes, 
+    SUM(comments) as total_comments, 
+	SUM(subscribers) as total_subscribers,
+	COUNT(chatter_url) as total_shares
 FROM(
     SELECT chatter_url,
         FIRST(bean_url) as bean_url, 
@@ -209,9 +209,9 @@ FROM(
 GROUP BY bean_url
 `
 
-func (ds *Ducksack) QueryChatterAggregates(urls []string) []Chatter {
+func (ds *Ducksack) QueryChatterAggregates(urls []string) []AggregatedChatter {
 	query, args := mustIn(_SQL_QUERY_CHATTER_AGGREGATES, urls)
-	return mustSelect[Chatter](ds, query, args...)
+	return mustSelect[AggregatedChatter](ds, query, args...)
 }
 
 // first take the chatters ONLY for the filtered urls
@@ -233,7 +233,8 @@ current_agg AS (
         SUM(likes) as likes,
         SUM(comments) as comments,
         SUM(subscribers) as subscribers,
-        COUNT(chatter_url) as shares
+        COUNT(chatter_url) as shares,
+
     FROM (
 		SELECT
 			chatter_url,
@@ -264,26 +265,29 @@ before_agg AS (
 			MAX(comments) as comments,
 			MAX(subscribers) as subscribers
 		FROM filtered_chatters
-		WHERE collected + INTERVAL 3 DAY < CURRENT_TIMESTAMP
+		WHERE collected + INTERVAL %d DAY < CURRENT_TIMESTAMP
 		GROUP BY chatter_url
 	)
     GROUP BY bean_url
 )
 SELECT
-	ca.bean_url,
-	ca.collected,
-	COALESCE(ca.likes, 0) - COALESCE(ba.likes, 0) as likes,
-	COALESCE(ca.comments, 0) - COALESCE(ba.comments, 0) as comments,
-	COALESCE(ca.subscribers, 0) - COALESCE(ba.subscribers, 0) as subscribers,
-	COALESCE(ca.shares, 0) - COALESCE(ba.shares, 0) as shares
+	ca.bean_url as url,
+	ca.collected as last_collected,
+	COALESCE(ca.likes, 0) - COALESCE(ba.likes, 0) as total_likes,
+	COALESCE(ca.comments, 0) - COALESCE(ba.comments, 0) as total_comments,
+	COALESCE(ca.subscribers, 0) - COALESCE(ba.subscribers, 0) as total_subscribers,
+	COALESCE(ca.shares, 0) - COALESCE(ba.shares, 0) as total_shares
 FROM current_agg ca
 LEFT JOIN before_agg ba
-ON ca.bean_url = ba.bean_url;
+ON ca.bean_url = ba.bean_url
+WHERE 
+	ca.collected + INTERVAL 1 day >= CURRENT_TIMESTAMP AND
+	(total_likes > 0 OR total_comments > 0 OR total_subscribers > 0 OR total_shares > 0);
 `
 
-func (ds *Ducksack) QueryChatterUpdates(urls []string, interval int) []Chatter {
-	query, args := mustIn(_SQL_QUERY_CHATTER_UPDATES, urls)
-	return mustSelect[Chatter](ds, query, args...)
+func (ds *Ducksack) QueryChatterUpdates(urls []string, interval int) []AggregatedChatter {
+	query, args := mustIn(fmt.Sprintf(_SQL_QUERY_CHATTER_UPDATES, interval), urls)
+	return mustSelect[AggregatedChatter](ds, query, args...)
 
 	// rows, err := ds.db.Query(_SQL_QUERY_CHATTER_UPDATES)
 	// noerror(err)
