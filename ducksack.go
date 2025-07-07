@@ -14,6 +14,7 @@ import (
 	"github.com/marcboeker/go-duckdb"
 	_ "github.com/marcboeker/go-duckdb"
 	_ "github.com/mattn/go-sqlite3"
+	datautils "github.com/soumitsalman/data-utils"
 )
 
 const (
@@ -29,6 +30,11 @@ const (
 	SOURCES         = "sources"
 	CATEGORIES      = "categories"
 	SENTIMENTS      = "sentiments"
+)
+
+const (
+	MAX_COMPUTED_TAGS = 3
+	MAX_RELATED_EPS   = 0.43
 )
 
 type Ducksack struct {
@@ -92,9 +98,9 @@ func prepareBeans(beans []Bean) []Bean {
 		if beans[i].Created.IsZero() {
 			beans[i].Created = now
 		}
-		if beans[i].Updated.IsZero() {
-			beans[i].Updated = now
-		}
+		// if beans[i].Updated.IsZero() {
+		// 	beans[i].Updated = now
+		// }
 		if beans[i].Collected.IsZero() {
 			beans[i].Collected = now
 		}
@@ -122,6 +128,42 @@ func (ds *Ducksack) StoreEmbeddings(embeddings []EmbeddingData) int {
 	return appendToTable(ds, BEAN_EMBEDDINGS, embeddings, func(embedding EmbeddingData) []driver.Value {
 		return []driver.Value{embedding.URL, embedding.Embedding}
 	})
+}
+
+func (ds *Ducksack) RectifyExtendedFields(embeddings []EmbeddingData, max_computed_tags int, max_cluster_eps float32) {
+	urls := datautils.Transform(embeddings, func(e *EmbeddingData) string {
+		return e.URL
+	})
+
+	const _SQL_INSERT_CATEGORIES = `
+	INSERT INTO bean_categories (url, category)
+	SELECT m1.url, m1.category FROM category_mappings m1
+	WHERE
+		m1.url IN (?) AND 
+		m1.category IN (
+			SELECT category FROM category_mappings m2
+			WHERE m1.url == m2.url
+			ORDER BY m2.distance LIMIT %d
+		);`
+	updateBeans(ds, fmt.Sprintf(_SQL_INSERT_CATEGORIES, max_computed_tags), urls)
+
+	const _SQL_INSERT_SENTIMENTS = `
+	INSERT INTO bean_sentiments (url, sentiment)
+	SELECT m1.url, m1.sentiment FROM sentiment_mappings m1
+	WHERE
+		m1.url IN (?) AND 
+		m1.sentiment IN (
+			SELECT sentiment FROM sentiment_mappings m2
+			WHERE m1.url == m2.url
+			ORDER BY m2.distance LIMIT %d
+		);`
+	updateBeans(ds, fmt.Sprintf(_SQL_INSERT_SENTIMENTS, max_computed_tags), urls)
+
+	const _SQL_INSERT_CLUSTERS = `
+	INSERT INTO bean_clusters (url, related)
+	SELECT url, related FROM cluster_mappings
+	WHERE url IN (?) AND distance < %f;`
+	updateBeans(ds, fmt.Sprintf(_SQL_INSERT_CLUSTERS, max_cluster_eps), urls)
 }
 
 func (ds *Ducksack) StoreTags(tags []TagData, tag_table string) int {
@@ -153,7 +195,7 @@ func (ds *Ducksack) StoreSources(sources []Source) int {
 	})
 }
 
-////////// QUERY WITH SCALAR MATCHING //////////
+////////// QUERY HELPERS //////////
 
 func mustIn(query string, args ...any) (string, []any) {
 	query, args, err := sqlx.In(query, args...)
@@ -167,35 +209,77 @@ func mustSelect[T any](ds *Ducksack, query string, args ...any) []T {
 	return data
 }
 
+func queryBeans[T any](ds *Ducksack, sql string, urls []string) []T {
+	query, args := mustIn(sql, urls)
+	var data []T
+	noerror(ds.query.Select(&data, query, args...))
+	return data
+}
+
+func updateBeans(ds *Ducksack, expr string, urls []string) {
+	query, args := mustIn(expr, urls)
+	_, err := ds.db.Exec(query, args...)
+	noerror(err)
+}
+
+////////// QUERY FUNCTIONS //////////
+
 func (ds *Ducksack) Exists(urls []string) []string {
-	query, args := mustIn("SELECT url FROM beans WHERE url IN (?)", urls)
-	return mustSelect[string](ds, query, args...)
+	return queryBeans[string](ds, "SELECT url FROM beans WHERE url IN (?)", urls)
 }
 
 func (ds *Ducksack) QueryBeans(urls []string) []Bean {
-	query, args := mustIn("SELECT * FROM beans WHERE url IN (?)", urls)
-	return mustSelect[Bean](ds, query, args...)
+	return queryBeans[Bean](ds, "SELECT * FROM beans WHERE url IN (?)", urls)
 }
 
-func (ds *Ducksack) QueryBeanEmbeddings(urls []string) []EmbeddingData {
-	query, args := mustIn("SELECT * FROM bean_embeddings WHERE url IN (?)", urls)
-	return mustSelect[EmbeddingData](ds, query, args...)
+func (ds *Ducksack) QueryBeansWithExtensions(urls []string) []ExtendedBean {
+	return queryBeans[ExtendedBean](ds, "SELECT * FROM bean_extensions WHERE url IN (?);", urls)
 }
 
-const _SQL_VECTOR_SEARCH_BEANS = `
-SELECT * FROM bean_embeddings
-ORDER BY array_cosine_distance(embedding, ?::FLOAT[%d])
-LIMIT ?
-`
-
-func (ds *Ducksack) VectorSearchBeans(embedding []float32, limit int) []EmbeddingData {
-	return mustSelect[EmbeddingData](
-		ds,
-		fmt.Sprintf(_SQL_VECTOR_SEARCH_BEANS, len(embedding)),
-		Vector(embedding),
-		limit,
-	)
+func (ds *Ducksack) QueryEmbeddings(urls []string) []ExtendedBean {
+	return queryBeans[ExtendedBean](ds, "SELECT * FROM bean_embeddings WHERE url IN (?);", urls)
 }
+
+func (ds *Ducksack) QueryGists(urls []string) []ExtendedBean {
+	return queryBeans[ExtendedBean](ds, "SELECT * FROM bean_gists WHERE url IN (?);", urls)
+}
+
+func (ds *Ducksack) QueryRegions(urls []string) []ExtendedBean {
+	const _SQL_QUERY_REGIONS = `
+	SELECT url, LIST(region) AS regions FROM bean_regions
+	WHERE url IN (?) GROUP BY url;`
+	return queryBeans[ExtendedBean](ds, _SQL_QUERY_REGIONS, urls)
+}
+
+func (ds *Ducksack) QueryEntities(urls []string) []ExtendedBean {
+	const _SQL_QUERY_ENTITIES = `
+	SELECT url, LIST(entity) AS entities FROM bean_entities
+	WHERE url IN (?) GROUP BY url;`
+	return queryBeans[ExtendedBean](ds, _SQL_QUERY_ENTITIES, urls)
+}
+
+func (ds *Ducksack) QueryCategories(urls []string) []ExtendedBean {
+	const _SQL_QUERY_CATEGORIES = `
+	SELECT url, LIST(category) AS categories FROM bean_categories 
+	WHERE url IN (?) GROUP BY url;`
+	return queryBeans[ExtendedBean](ds, _SQL_QUERY_CATEGORIES, urls)
+}
+
+func (ds *Ducksack) QuerySentiments(urls []string) []ExtendedBean {
+	const _SQL_QUERY_SENTIMENTS = `
+	SELECT url, LIST(sentiment) AS sentiments FROM bean_sentiments 
+	WHERE url IN (?) GROUP BY url;`
+	return queryBeans[ExtendedBean](ds, _SQL_QUERY_SENTIMENTS, urls)
+}
+
+func (ds *Ducksack) QueryClusters(urls []string) []ExtendedBean {
+	const _SQL_QUERY_CLUSTERS = `
+	SELECT url, LIST(related) AS related FROM bean_clusters
+	WHERE url IN (?) GROUP BY url;`
+	return queryBeans[ExtendedBean](ds, _SQL_QUERY_CLUSTERS, urls)
+}
+
+/////////// CHATTER QUERIES //////////
 
 func (ds *Ducksack) QueryChatters(urls []string) []Chatter {
 	query, args := mustIn("SELECT * FROM chatters WHERE bean_url IN (?) ORDER BY collected DESC", urls)
@@ -283,67 +367,15 @@ func (ds *Ducksack) QueryChatterUpdates(urls []string) []ChatterAggregate {
 	return mustSelect[ChatterAggregate](ds, query, args...)
 }
 
-////////// QUERY WITH FUZZY MATCHING //////////
+////////// VECTOR SEARCH //////////
 
-const _SQL_MATCH_CATEGORIES = `
-SELECT url, LIST(category) AS categories  
-FROM top3_categories 
-WHERE url IN (?) 
-GROUP BY url;
-`
-
-func (ds *Ducksack) MatchCategories(urls []string) []BeanAggregate {
-	query, args, err := sqlx.In(_SQL_MATCH_CATEGORIES, urls)
-	noerror(err)
-	var categories []BeanAggregate
-	noerror(ds.query.Select(&categories, query, args...))
-	return categories
-}
-
-const _SQL_MATCH_SENTIMENTS = `
-SELECT url, LIST(sentiment) AS sentiments 
-FROM top3_sentiments 
-WHERE url IN (?) 
-GROUP BY url;
-`
-
-func (ds *Ducksack) MatchSentiments(urls []string) []BeanAggregate {
-	query, args, err := sqlx.In(_SQL_MATCH_SENTIMENTS, urls)
-	noerror(err)
-	var sentiments []BeanAggregate
-	noerror(ds.query.Select(&sentiments, query, args...))
-	return sentiments
-}
-
-const _SQL_MATCH_CLUSTERS = `
-WITH 
-	filtered_beans AS (
-		SELECT * 
-		FROM bean_embeddings 
-		WHERE id IN (?)
-	),
-	cluster_matches AS (
-		SELECT fb.id as id, mb.id as tag, array_distance(fb.embedding, mb.embedding) as distance
-		FROM filtered_beans fb CROSS JOIN bean_embeddings mb
-		WHERE mb.id != fb.id AND distance < %f
-	)
-SELECT id, tag
-FROM cluster_matches cm
-WHERE tag IN (
-	SELECT tag FROM cluster_matches cm2
-	WHERE cm2.id == cm.id 
-	ORDER BY cm2.distance LIMIT %d
-)
-ORDER BY cm.id, cm.distance;
-`
-
-func (ds *Ducksack) MatchClusters(ids []string, threshold float64, limit int) []TagData {
-	sql := fmt.Sprintf(_SQL_MATCH_CLUSTERS, threshold, limit)
-	query, args, err := sqlx.In(sql, ids)
-	noerror(err)
-	var clusters []TagData
-	noerror(ds.query.Select(&clusters, query, args...))
-	return clusters
+func (ds *Ducksack) VectorSearchBeans(embedding []float32, limit int) []EmbeddingData {
+	const _SQL_VECTOR_SEARCH_BEANS = `
+	SELECT * FROM bean_embeddings
+	ORDER BY array_cosine_distance(embedding, ?::FLOAT[%d])
+	LIMIT ?`
+	sql := fmt.Sprintf(_SQL_VECTOR_SEARCH_BEANS, len(embedding))
+	return mustSelect[EmbeddingData](ds, sql, Vector(embedding), limit)
 }
 
 func (ds *Ducksack) Close() {

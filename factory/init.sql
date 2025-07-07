@@ -3,7 +3,7 @@ INSTALL vss;
 LOAD vss;
 
 CREATE TABLE IF NOT EXISTS beans (
-    url VARCHAR PRIMARY KEY,
+    url VARCHAR NOT NULL PRIMARY KEY,
     kind VARCHAR NOT NULL,
     title VARCHAR,
     title_length INTEGER DEFAULT 0,
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS beans (
 );
 
 CREATE TABLE IF NOT EXISTS generated_beans (
-    url VARCHAR PRIMARY KEY,
+    url VARCHAR NOT NULL PRIMARY KEY,
     intro TEXT,
     analysis TEXT[],
     insights TEXT[],
@@ -29,29 +29,30 @@ CREATE TABLE IF NOT EXISTS bean_embeddings (
     url VARCHAR PRIMARY KEY,
     embedding FLOAT[%d] NOT NULL
 );
+
 CREATE TABLE IF NOT EXISTS bean_clusters (
     url VARCHAR NOT NULL,
-    tag VARCHAR NOT NULL
+    related VARCHAR NOT NULL
 );
 CREATE TABLE IF NOT EXISTS bean_categories (
     url VARCHAR NOT NULL,
-    tag VARCHAR NOT NULL
+    category VARCHAR NOT NULL
 );
 CREATE TABLE IF NOT EXISTS bean_sentiments (
     url VARCHAR NOT NULL,
-    tag VARCHAR NOT NULL
+    sentiment VARCHAR NOT NULL
 );
 CREATE TABLE IF NOT EXISTS bean_gists (
     url VARCHAR NOT NULL,
-    tag TEXT NOT NULL
+    gist TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS bean_regions (
     url VARCHAR NOT NULL,
-    tag VARCHAR NOT NULL
+    region VARCHAR NOT NULL
 );
 CREATE TABLE IF NOT EXISTS bean_entities (
     url VARCHAR NOT NULL,
-    tag VARCHAR NOT NULL
+    entity VARCHAR NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS chatters (
@@ -85,7 +86,6 @@ FROM(
 ) 
 GROUP BY bean_url;
 
-
 CREATE TABLE IF NOT EXISTS sources (
     name VARCHAR,
     description TEXT,
@@ -108,15 +108,6 @@ SELECT
     array_cosine_distance(b.embedding, c.embedding) as distance
 FROM bean_embeddings b CROSS JOIN categories c;
 
-CREATE VIEW IF NOT EXISTS top3_categories AS
-SELECT m1.url, m1.category FROM category_mappings m1
-WHERE category IN (
-    SELECT category FROM category_mappings m2
-    WHERE m1.url == m2.url
-    ORDER BY m2.distance LIMIT 3
-)
-ORDER BY m1.url, m1.distance;
-
 CREATE TABLE IF NOT EXISTS sentiments AS
 SELECT 
     _id as sentiment,
@@ -130,11 +121,41 @@ SELECT
     array_cosine_distance(b.embedding, s.embedding) as distance
 FROM bean_embeddings b CROSS JOIN sentiments s;
 
-CREATE VIEW IF NOT EXISTS top3_sentiments AS
-SELECT url, sentiment FROM sentiment_mappings m1
-WHERE sentiment IN (
-    SELECT sentiment FROM sentiment_mappings m2
-    WHERE m1.url == m2.url
-    ORDER BY m2.distance LIMIT 3
-)
-ORDER BY url, distance;
+CREATE VIEW IF NOT EXISTS cluster_mappings AS 
+SELECT 
+    be1.url as url, 
+    be2.url as related, 
+    array_distance(be1.embedding, be2.embedding) as distance
+FROM bean_embeddings be1 CROSS JOIN bean_embeddings be2
+WHERE be1.url != be2.url;
+
+CREATE VIEW IF NOT EXISTS bean_extensions AS
+SELECT
+    b.url, b.kind, b.title, b.title_length, b.summary, b.summary_length, b.author, b.source, b.created, b.collected,
+    e.embedding,
+    c.categories,
+    s.sentiments,
+    cl.related,
+    g.gist,
+    r.regions,
+    n.entities
+FROM beans b
+LEFT JOIN bean_embeddings e ON b.url = e.url
+LEFT JOIN (
+	SELECT url, LIST(category) as categories FROM bean_categories GROUP BY url
+) as c ON b.url = c.url
+LEFT JOIN (
+	SELECT url, LIST(sentiment) as sentiments FROM bean_sentiments GROUP BY url
+) as s ON b.url = s.url
+LEFT JOIN (
+	SELECT url, LIST(related) as related FROM bean_clusters GROUP BY url
+) as cl ON b.url = cl.url 
+LEFT JOIN bean_gists g ON b.url = g.url
+LEFT JOIN (
+	SELECT url, LIST(region) as regions FROM bean_regions GROUP BY url
+) as r ON b.url = r.url
+LEFT JOIN (
+	SELECT url, LIST(entity) as entities FROM bean_entities GROUP BY url
+) as n ON b.url = n.url
+-- LEFT JOIN chatter_aggregates ch ON b.url = ch.url
+;

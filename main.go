@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/k0kubun/pp"
 )
@@ -45,9 +46,11 @@ func main() {
 	ds := NewDucksack(dbpath, initsql, dim)
 	defer ds.Close()
 
-	var importnum int64 = 400
+	var importnum int64 = 10000
 	ds.StoreBeans(getTestBeans(importnum))
-	ds.StoreEmbeddings(getTestEmbeddings(importnum))
+	embeddings := getTestEmbeddings(importnum)
+	ds.StoreEmbeddings(embeddings)
+	ds.RectifyExtendedFields(embeddings, 3, 0.43)
 	ds.StoreChatters(getTestChatters(400000))
 	ds.StoreSources(getTestSources(importnum))
 	digests := getTestDigests(importnum)
@@ -62,12 +65,12 @@ func main() {
 	if gist, ok := tags["gist"]; ok && len(gist) > 0 {
 		ds.StoreTags(gist, BEAN_GISTS)
 	}
-	if cats, ok := tags["categories"]; ok && len(cats) > 0 {
-		ds.StoreTags(cats, BEAN_CATEGORIES)
-	}
-	if sentiments, ok := tags["sentiments"]; ok && len(sentiments) > 0 {
-		ds.StoreTags(sentiments, BEAN_SENTIMENTS)
-	}
+	// if cats, ok := tags["categories"]; ok && len(cats) > 0 {
+	// 	ds.StoreTags(cats, BEAN_CATEGORIES)
+	// }
+	// if sentiments, ok := tags["sentiments"]; ok && len(sentiments) > 0 {
+	// 	ds.StoreTags(sentiments, BEAN_SENTIMENTS)
+	// }
 
 	// titles := []string{
 	// 	"Synthflow AI is bringing 'conversational' voice agents to call centers. Read the pitch deck that it used to raise $20 million.",
@@ -110,6 +113,7 @@ func main() {
 		"https://www.slashgear.com/1896648/lifesaber-emergency-tool-usb-powered-features/",
 		"https://www.wusa9.com/article/news/nation-world/trump-big-bill-may-have-political-cost/507-0c07fc4b-248b-4a3b-96c0-81d75a511228",
 		"https://issuepay.app",
+		"https://minutemirror.com.pk/lahore-high-court-halts-transfer-of-brazilian-monkeys-to-lahore-zoo-406544/",
 		"https://jameshard.ing/pilot",
 		"https://jobsbyreferral.com/",
 		"https://llmapitest.com/",
@@ -122,9 +126,10 @@ func main() {
 
 	// 	similars := ds.VectorSearchBeans(embedding.Embedding, 5)
 	// 	pp.Println(embedding.URL, datautils.Transform(similars, func(s *EmbeddingData) string {
-	// 		res, err := json.MarshalIndent(s, "", "  ")
-	// 		noerror(err)
-	// 		return string(res)
+	// 		return s.URL
+	// 		// res, err := json.MarshalIndent(s, "", "  ")
+	// 		// noerror(err)
+	// 		// return string(res)
 	// 	}))
 	// }
 
@@ -132,6 +137,15 @@ func main() {
 	// pp.Println("AGGREGATES", ds.QueryChatterAggregates(urls))
 	// pp.Println("UPDATES", ds.QueryChatterUpdates(urls, 1))
 
-	pp.Println("CATEGORY MATCHES", ds.MatchCategories(urls))
-	pp.Println("SENTIMENT MATCHES", ds.MatchSentiments(urls))
+	// pp.Println("CATEGORIES", ds.QueryCategories(urls))
+	// pp.Println("SENTIMENTS", ds.QuerySentiments(urls))
+	// pp.Println("RELATED", ds.QueryClusters(urls))
+	// pp.Println("REGIONS", ds.QueryRegions(urls))
+	// pp.Println("ENTITIES", ds.QueryEntities(urls))
+	// pp.Println("GISTS", ds.QueryGists(urls))
+
+	start := time.Now()
+	res := ds.QueryBeansWithExtensions(urls)
+	pp.Println("BEAN AGGREGATES", res, time.Since(start))
+
 }

@@ -40,20 +40,32 @@ type Bean struct {
 	Author        string    `db:"author"`
 	Source        string    `db:"source"`
 	Created       time.Time `db:"created" bson:"created"`
-	Updated       time.Time `db:"updated" bson:"updated"`
 	Collected     time.Time `db:"collected" bson:"collected"`
 }
 
-type BeanAggregate struct {
-	Bean
-	EmbeddingData
-	ChatterAggregate
-	Related    Tags   `db:"related"`
-	Categories Tags   `db:"categories"`
-	Sentiments Tags   `db:"sentiments"`
-	Regions    Tags   `db:"regions"`
-	Entities   Tags   `db:"entities"`
-	Gist       string `db:"gist"`
+type ExtendedBean struct {
+	URL           string    `db:"url"`
+	Kind          string    `db:"kind"`
+	Title         string    `db:"title"`
+	TitleLength   int       `db:"title_length" bson:"num_words_in_title"`
+	Summary       string    `db:"summary"`
+	SummaryLength int       `db:"summary_length" bson:"num_words_in_summary"`
+	Author        string    `db:"author"`
+	Source        string    `db:"source"`
+	Created       time.Time `db:"created" bson:"created"`
+	Collected     time.Time `db:"collected" bson:"collected"`
+	Embedding     Vector    `db:"embedding"`
+	Categories    Tags      `db:"categories"`
+	Sentiments    Tags      `db:"sentiments"`
+	Related       Tags      `db:"related"`
+	Gist          string    `db:"gist"`
+	Regions       Tags      `db:"regions"`
+	Entities      Tags      `db:"entities"`
+	// Updated       time.Time `db:"updated"` // last time some chatter was collected
+	// Likes         int       `db:"total_likes"`
+	// Comments      int       `db:"total_comments"`
+	// Subscribers   int       `db:"total_subscribers"`
+	// Shares        int       `db:"total_shares"`
 }
 
 type GeneratedBean struct {
@@ -101,8 +113,10 @@ func (vec Tags) Value() (driver.Value, error) {
 
 func (vec *Tags) Scan(value interface{}) error {
 	if value == nil {
-		return fmt.Errorf("value cannot be nil")
+		*vec = nil
+		return nil
 	}
+
 	switch value := value.(type) {
 	case []interface{}:
 		converted := make([]string, len(value))
@@ -129,8 +143,10 @@ func (vec Vector) Value() (driver.Value, error) {
 
 func (vec *Vector) Scan(value interface{}) error {
 	if value == nil {
-		return fmt.Errorf("value cannot be nil")
+		*vec = nil
+		return nil
 	}
+
 	switch value := value.(type) {
 	case []interface{}:
 		converted := make([]float32, len(value))
