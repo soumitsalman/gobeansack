@@ -291,81 +291,106 @@ func (ds *Ducksack) QueryChatterAggregates(urls []string) []ChatterAggregate {
 	return mustSelect[ChatterAggregate](ds, query, args...)
 }
 
-// first take the chatters ONLY for the filtered urls
-// then take the current chatters and group by id
-// then then add/agg per bean
-// take the ones that got updated in last 1 day
-// take the chatters from 1 day ago per id
-// then aggregate per bean
-// then subtract
-const _SQL_QUERY_CHATTER_UPDATES = `
-WITH 
-filtered_chatters AS (
-    SELECT * FROM chatters WHERE bean_url IN (?)
-),
-current_agg AS (
-	SELECT
-        bean_url,
-        MAX(collected) as collected,
-        SUM(likes) as likes,
-        SUM(comments) as comments,
-        SUM(subscribers) as subscribers,
-        COUNT(chatter_url) as shares,
-
-    FROM (
-		SELECT
-			chatter_url,
-			FIRST(bean_url) as bean_url,
-			MAX(collected) as collected,
-			MAX(likes) as likes,
-			MAX(comments) as comments,
-			MAX(subscribers) as subscribers
-		FROM filtered_chatters
-		GROUP BY chatter_url
-	)
-    GROUP BY bean_url
-),
-before_agg AS (
-	SELECT
-        bean_url,
-        MAX(collected) as collected,
-        SUM(likes) as likes,
-        SUM(comments) as comments,
-        SUM(subscribers) as subscribers,
-        COUNT(chatter_url) as shares
-    FROM (
-		SELECT
-			chatter_url,
-			FIRST(bean_url) as bean_url,
-			MAX(collected) as collected,
-			MAX(likes) as likes,
-			MAX(comments) as comments,
-			MAX(subscribers) as subscribers
-		FROM filtered_chatters
-		WHERE collected + INTERVAL 1 DAY < CURRENT_TIMESTAMP
-		GROUP BY chatter_url
-	)
-    GROUP BY bean_url
-)
-SELECT
-	ca.bean_url as url,
-	ca.collected as last_collected,
-	COALESCE(ca.likes, 0) - COALESCE(ba.likes, 0) as total_likes,
-	COALESCE(ca.comments, 0) - COALESCE(ba.comments, 0) as total_comments,
-	COALESCE(ca.subscribers, 0) - COALESCE(ba.subscribers, 0) as total_subscribers,
-	COALESCE(ca.shares, 0) - COALESCE(ba.shares, 0) as total_shares
-FROM current_agg ca
-LEFT JOIN before_agg ba
-ON ca.bean_url = ba.bean_url
-WHERE 
-	ca.collected + INTERVAL 1 day >= CURRENT_TIMESTAMP AND
-	(total_likes > 0 OR total_comments > 0 OR total_subscribers > 0 OR total_shares > 0);
-`
-
-func (ds *Ducksack) QueryChatterUpdates(urls []string) []ChatterAggregate {
-	query, args := mustIn(_SQL_QUERY_CHATTER_UPDATES, urls)
-	return mustSelect[ChatterAggregate](ds, query, args...)
+func (ds *Ducksack) DistinctRegions() []string {
+	const _SQL_GET_ALL_REGIONS = `SELECT DISTINCT region FROM bean_regions;`
+	return mustSelect[string](ds, _SQL_GET_ALL_REGIONS)
 }
+
+func (ds *Ducksack) DistinctEntities() []string {
+	const _SQL_GET_ALL_ENTITIES = `SELECT DISTINCT entity FROM bean_entities;`
+	return mustSelect[string](ds, _SQL_GET_ALL_ENTITIES)
+}
+
+func (ds *Ducksack) DistinctCategories() []string {
+	const _SQL_GET_ALL_CATEGORIES = `SELECT category FROM categories;`
+	return mustSelect[string](ds, _SQL_GET_ALL_CATEGORIES)
+}
+
+func (ds *Ducksack) DistinctSentiments() []string {
+	const _SQL_GET_ALL_SENTIMENTS = `SELECT sentiment FROM sentiments;`
+	return mustSelect[string](ds, _SQL_GET_ALL_SENTIMENTS)
+}
+
+func (ds *Ducksack) DistinctSources() []string {
+	const _SQL_GET_ALL_SOURCES = `SELECT base_url AS value FROM sources;`
+	return mustSelect[string](ds, _SQL_GET_ALL_SOURCES)
+}
+
+// // first take the chatters ONLY for the filtered urls
+// // then take the current chatters and group by id
+// // then then add/agg per bean
+// // take the ones that got updated in last 1 day
+// // take the chatters from 1 day ago per id
+// // then aggregate per bean
+// // then subtract
+// const _SQL_QUERY_CHATTER_UPDATES = `
+// WITH
+// filtered_chatters AS (
+//     SELECT * FROM chatters WHERE bean_url IN (?)
+// ),
+// current_agg AS (
+// 	SELECT
+//         bean_url,
+//         MAX(collected) as collected,
+//         SUM(likes) as likes,
+//         SUM(comments) as comments,
+//         SUM(subscribers) as subscribers,
+//         COUNT(chatter_url) as shares,
+
+//     FROM (
+// 		SELECT
+// 			chatter_url,
+// 			FIRST(bean_url) as bean_url,
+// 			MAX(collected) as collected,
+// 			MAX(likes) as likes,
+// 			MAX(comments) as comments,
+// 			MAX(subscribers) as subscribers
+// 		FROM filtered_chatters
+// 		GROUP BY chatter_url
+// 	)
+//     GROUP BY bean_url
+// ),
+// before_agg AS (
+// 	SELECT
+//         bean_url,
+//         MAX(collected) as collected,
+//         SUM(likes) as likes,
+//         SUM(comments) as comments,
+//         SUM(subscribers) as subscribers,
+//         COUNT(chatter_url) as shares
+//     FROM (
+// 		SELECT
+// 			chatter_url,
+// 			FIRST(bean_url) as bean_url,
+// 			MAX(collected) as collected,
+// 			MAX(likes) as likes,
+// 			MAX(comments) as comments,
+// 			MAX(subscribers) as subscribers
+// 		FROM filtered_chatters
+// 		WHERE collected + INTERVAL 1 DAY < CURRENT_TIMESTAMP
+// 		GROUP BY chatter_url
+// 	)
+//     GROUP BY bean_url
+// )
+// SELECT
+// 	ca.bean_url as url,
+// 	ca.collected as last_collected,
+// 	COALESCE(ca.likes, 0) - COALESCE(ba.likes, 0) as total_likes,
+// 	COALESCE(ca.comments, 0) - COALESCE(ba.comments, 0) as total_comments,
+// 	COALESCE(ca.subscribers, 0) - COALESCE(ba.subscribers, 0) as total_subscribers,
+// 	COALESCE(ca.shares, 0) - COALESCE(ba.shares, 0) as total_shares
+// FROM current_agg ca
+// LEFT JOIN before_agg ba
+// ON ca.bean_url = ba.bean_url
+// WHERE
+// 	ca.collected + INTERVAL 1 day >= CURRENT_TIMESTAMP AND
+// 	(total_likes > 0 OR total_comments > 0 OR total_subscribers > 0 OR total_shares > 0);
+// `
+
+// func (ds *Ducksack) QueryChatterUpdates(urls []string) []ChatterAggregate {
+// 	query, args := mustIn(_SQL_QUERY_CHATTER_UPDATES, urls)
+// 	return mustSelect[ChatterAggregate](ds, query, args...)
+// }
 
 ////////// VECTOR SEARCH //////////
 

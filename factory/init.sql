@@ -108,8 +108,8 @@ GROUP BY bean_url;
 CREATE TABLE IF NOT EXISTS sources (
     name VARCHAR,
     description TEXT,
-    base_url VARCHAR PRIMARY KEY,
-    domain_name VARCHAR,
+    base_url VARCHAR NOT NULL PRIMARY KEY,
+    domain_name VARCHAR NOT NULL,
     favicon VARCHAR,
     rss_feed VARCHAR
 );
