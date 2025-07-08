@@ -200,6 +200,6 @@ func getTestChatters(limit int64) []Chatter {
 }
 
 func getTestSources(limit int64) []Source {
-	sources := mongoFind[Source]("espresso", "sources", nil, limit, nil)
+	sources := mongoFind[Source]("master", "sources", nil, limit, nil)
 	return sources
 }

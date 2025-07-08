@@ -72,18 +72,18 @@ WITH
         SELECT 
             chatter_url,
             MAX(likes) as likes, 
-            MAX(comments) as comments,
+            MAX(comments) as comments
         FROM chatters 
         GROUP BY chatter_url
     ),
     first_seen AS (
         SELECT 
-            chatter_url,
-            MIN(collected) as collected
+            fs.chatter_url,
+            MIN(fs.collected) as collected
         FROM chatters fs 
         LEFT JOIN max_stats mx ON fs.chatter_url = mx.chatter_url
         WHERE fs.likes = mx.likes AND fs.comments = mx.comments
-        GROUP BY chatter_url
+        GROUP BY fs.chatter_url
     )
 SELECT 
     bean_url as url,
@@ -94,14 +94,15 @@ SELECT
     COUNT(chatter_url) as shares
 FROM(
     SELECT 
-        chatter_url,
-        bean_url, 
-        collected, 
-        likes, 
-        comments,
-        subscribers
+        ch.chatter_url,
+        ch.bean_url, 
+        ch.collected, 
+        ch.likes, 
+        ch.comments,
+        ch.subscribers
     FROM chatters ch 
-    LEFT JOIN first_seen fs ON fs.chatter_url = chatter_url, fs.collected = collected
+    LEFT JOIN first_seen fs ON fs.chatter_url = ch.chatter_url  
+    WHERE fs.collected = ch.collected
 ) 
 GROUP BY bean_url;
 
@@ -148,7 +149,7 @@ SELECT
 FROM bean_embeddings be1 CROSS JOIN bean_embeddings be2
 WHERE be1.url != be2.url;
 
-CREATE VIEW IF NOT EXISTS bean_extensions AS
+CREATE VIEW IF NOT EXISTS bean_aggregates AS
 SELECT
     b.url, b.kind, b.title, b.title_length, b.summary, b.summary_length, b.author, b.source, b.created, b.collected,
     e.embedding,
@@ -158,7 +159,7 @@ SELECT
     g.gist,
     r.regions,
     n.entities,
-    COALESCE(ch.collected, b.collected) as updated,
+    COALESCE(ch.collected, b.created) as updated,
     COALESCE(ch.likes, 0) as likes,
     COALESCE(ch.comments, 0) as comments,
     COALESCE(ch.subscribers, 0) as subscribers,

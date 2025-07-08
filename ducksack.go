@@ -145,7 +145,7 @@ func (ds *Ducksack) RectifyExtendedFields(embeddings []EmbeddingData, max_comput
 			WHERE m1.url == m2.url
 			ORDER BY m2.distance LIMIT %d
 		);`
-	updateBeans(ds, fmt.Sprintf(_SQL_INSERT_CATEGORIES, max_computed_tags), urls)
+	updateItems(ds, fmt.Sprintf(_SQL_INSERT_CATEGORIES, max_computed_tags), urls)
 
 	const _SQL_INSERT_SENTIMENTS = `
 	INSERT INTO bean_sentiments (url, sentiment)
@@ -157,13 +157,13 @@ func (ds *Ducksack) RectifyExtendedFields(embeddings []EmbeddingData, max_comput
 			WHERE m1.url == m2.url
 			ORDER BY m2.distance LIMIT %d
 		);`
-	updateBeans(ds, fmt.Sprintf(_SQL_INSERT_SENTIMENTS, max_computed_tags), urls)
+	updateItems(ds, fmt.Sprintf(_SQL_INSERT_SENTIMENTS, max_computed_tags), urls)
 
 	const _SQL_INSERT_CLUSTERS = `
 	INSERT INTO bean_clusters (url, related)
 	SELECT url, related FROM cluster_mappings
 	WHERE url IN (?) AND distance < %f;`
-	updateBeans(ds, fmt.Sprintf(_SQL_INSERT_CLUSTERS, max_cluster_eps), urls)
+	updateItems(ds, fmt.Sprintf(_SQL_INSERT_CLUSTERS, max_cluster_eps), urls)
 }
 
 func (ds *Ducksack) StoreTags(tags []TagData, tag_table string) int {
@@ -209,14 +209,14 @@ func mustSelect[T any](ds *Ducksack, query string, args ...any) []T {
 	return data
 }
 
-func queryBeans[T any](ds *Ducksack, sql string, urls []string) []T {
+func queryItems[T any](ds *Ducksack, sql string, urls []string) []T {
 	query, args := mustIn(sql, urls)
 	var data []T
 	noerror(ds.query.Select(&data, query, args...))
 	return data
 }
 
-func updateBeans(ds *Ducksack, expr string, urls []string) {
+func updateItems(ds *Ducksack, expr string, urls []string) {
 	query, args := mustIn(expr, urls)
 	_, err := ds.db.Exec(query, args...)
 	noerror(err)
@@ -225,58 +225,58 @@ func updateBeans(ds *Ducksack, expr string, urls []string) {
 ////////// QUERY FUNCTIONS //////////
 
 func (ds *Ducksack) Exists(urls []string) []string {
-	return queryBeans[string](ds, "SELECT url FROM beans WHERE url IN (?)", urls)
+	return queryItems[string](ds, "SELECT url FROM beans WHERE url IN (?)", urls)
 }
 
-func (ds *Ducksack) QueryBeans(urls []string) []Bean {
-	return queryBeans[Bean](ds, "SELECT * FROM beans WHERE url IN (?)", urls)
-}
+// func (ds *Ducksack) QueryBeans(urls []string) []Bean {
+// 	return queryItems[Bean](ds, "SELECT * FROM beans WHERE url IN (?)", urls)
+// }
 
-func (ds *Ducksack) QueryBeansWithExtensions(urls []string) []ExtendedBean {
-	return queryBeans[ExtendedBean](ds, "SELECT * FROM bean_extensions WHERE url IN (?);", urls)
+func (ds *Ducksack) QueryBeans(urls []string) []ExtendedBean {
+	return queryItems[ExtendedBean](ds, "SELECT * FROM bean_aggregates WHERE url IN (?);", urls)
 }
 
 func (ds *Ducksack) QueryEmbeddings(urls []string) []ExtendedBean {
-	return queryBeans[ExtendedBean](ds, "SELECT * FROM bean_embeddings WHERE url IN (?);", urls)
+	return queryItems[ExtendedBean](ds, "SELECT * FROM bean_embeddings WHERE url IN (?);", urls)
 }
 
 func (ds *Ducksack) QueryGists(urls []string) []ExtendedBean {
-	return queryBeans[ExtendedBean](ds, "SELECT * FROM bean_gists WHERE url IN (?);", urls)
+	return queryItems[ExtendedBean](ds, "SELECT * FROM bean_gists WHERE url IN (?);", urls)
 }
 
 func (ds *Ducksack) QueryRegions(urls []string) []ExtendedBean {
 	const _SQL_QUERY_REGIONS = `
 	SELECT url, LIST(region) AS regions FROM bean_regions
 	WHERE url IN (?) GROUP BY url;`
-	return queryBeans[ExtendedBean](ds, _SQL_QUERY_REGIONS, urls)
+	return queryItems[ExtendedBean](ds, _SQL_QUERY_REGIONS, urls)
 }
 
 func (ds *Ducksack) QueryEntities(urls []string) []ExtendedBean {
 	const _SQL_QUERY_ENTITIES = `
 	SELECT url, LIST(entity) AS entities FROM bean_entities
 	WHERE url IN (?) GROUP BY url;`
-	return queryBeans[ExtendedBean](ds, _SQL_QUERY_ENTITIES, urls)
+	return queryItems[ExtendedBean](ds, _SQL_QUERY_ENTITIES, urls)
 }
 
 func (ds *Ducksack) QueryCategories(urls []string) []ExtendedBean {
 	const _SQL_QUERY_CATEGORIES = `
 	SELECT url, LIST(category) AS categories FROM bean_categories 
 	WHERE url IN (?) GROUP BY url;`
-	return queryBeans[ExtendedBean](ds, _SQL_QUERY_CATEGORIES, urls)
+	return queryItems[ExtendedBean](ds, _SQL_QUERY_CATEGORIES, urls)
 }
 
 func (ds *Ducksack) QuerySentiments(urls []string) []ExtendedBean {
 	const _SQL_QUERY_SENTIMENTS = `
 	SELECT url, LIST(sentiment) AS sentiments FROM bean_sentiments 
 	WHERE url IN (?) GROUP BY url;`
-	return queryBeans[ExtendedBean](ds, _SQL_QUERY_SENTIMENTS, urls)
+	return queryItems[ExtendedBean](ds, _SQL_QUERY_SENTIMENTS, urls)
 }
 
 func (ds *Ducksack) QueryClusters(urls []string) []ExtendedBean {
 	const _SQL_QUERY_CLUSTERS = `
 	SELECT url, LIST(related) AS related FROM bean_clusters
 	WHERE url IN (?) GROUP BY url;`
-	return queryBeans[ExtendedBean](ds, _SQL_QUERY_CLUSTERS, urls)
+	return queryItems[ExtendedBean](ds, _SQL_QUERY_CLUSTERS, urls)
 }
 
 /////////// CHATTER QUERIES //////////
@@ -290,6 +290,8 @@ func (ds *Ducksack) QueryChatterAggregates(urls []string) []ChatterAggregate {
 	query, args := mustIn("SELECT * FROM chatter_aggregates WHERE url IN (?)", urls)
 	return mustSelect[ChatterAggregate](ds, query, args...)
 }
+
+////////// DISTINCT ITEMS //////////
 
 func (ds *Ducksack) DistinctRegions() []string {
 	const _SQL_GET_ALL_REGIONS = `SELECT DISTINCT region FROM bean_regions;`
@@ -314,6 +316,17 @@ func (ds *Ducksack) DistinctSentiments() []string {
 func (ds *Ducksack) DistinctSources() []string {
 	const _SQL_GET_ALL_SOURCES = `SELECT base_url AS value FROM sources;`
 	return mustSelect[string](ds, _SQL_GET_ALL_SOURCES)
+}
+
+//////////// STREAM QUERIES ///////////
+
+func (ds *Ducksack) StreamBeans(kind string, created_after time.Time, offset int64, limit int64) []ExtendedBean {
+	const _SQL_STREAM_BEANS = `
+	SELECT * FROM bean_aggregates
+	WHERE kind = ? AND created >= ?
+	ORDER BY created DESC
+	OFFSET ? LIMIT ?;`
+	return mustSelect[ExtendedBean](ds, _SQL_STREAM_BEANS, kind, created_after, offset, limit)
 }
 
 // // first take the chatters ONLY for the filtered urls

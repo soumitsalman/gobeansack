@@ -35,18 +35,8 @@ func prepareTags(digests []Digest) map[string][]TagData {
 	return results
 }
 
-func main() {
-	// initialize database if needed
-	init, err := os.ReadFile("./factory/init.sql")
-	noerror(err)
-	dim := 384
-	dbpath := "" // ".cache/test.db"
-	initsql := fmt.Sprintf(string(init), dim, dim, "./factory/categories.parquet", dim, "./factory/sentiments.parquet")
-
-	ds := NewDucksack(dbpath, initsql, dim)
-	defer ds.Close()
-
-	var importnum int64 = 10000
+func hydrateTestDB(ds *Ducksack) {
+	var importnum int64 = 50000
 	ds.StoreBeans(getTestBeans(importnum))
 	embeddings := getTestEmbeddings(importnum)
 	ds.StoreEmbeddings(embeddings)
@@ -65,12 +55,68 @@ func main() {
 	if gist, ok := tags["gist"]; ok && len(gist) > 0 {
 		ds.StoreTags(gist, BEAN_GISTS)
 	}
-	// if cats, ok := tags["categories"]; ok && len(cats) > 0 {
-	// 	ds.StoreTags(cats, BEAN_CATEGORIES)
-	// }
-	// if sentiments, ok := tags["sentiments"]; ok && len(sentiments) > 0 {
-	// 	ds.StoreTags(sentiments, BEAN_SENTIMENTS)
-	// }
+}
+
+func testQueryDistinctValues(ds *Ducksack) {
+	pp.Println("REGIONS", ds.DistinctRegions()[:3])
+	pp.Println("ENTITIES", ds.DistinctEntities()[:3])
+	pp.Println("SOURCES", ds.DistinctSources()[:3])
+	pp.Println("CATEGORIES", ds.DistinctCategories()[:3])
+}
+
+func testQueryChatterStats(ds *Ducksack) {
+	urls := []string{
+		"https://www.slashgear.com/1896648/lifesaber-emergency-tool-usb-powered-features/",
+		"https://www.wusa9.com/article/news/nation-world/trump-big-bill-may-have-political-cost/507-0c07fc4b-248b-4a3b-96c0-81d75a511228",
+		"https://issuepay.app",
+		"https://minutemirror.com.pk/lahore-high-court-halts-transfer-of-brazilian-monkeys-to-lahore-zoo-406544/",
+		"https://jameshard.ing/pilot",
+		"https://jobsbyreferral.com/",
+		"https://llmapitest.com/",
+		"https://htmlrev.com/",
+	}
+
+	pp.Println("CHATTERS", ds.QueryChatters(urls)[:5])
+	pp.Println("AGGREGATES", ds.QueryChatterAggregates(urls))
+}
+
+func testQueryBeanExtensions(ds *Ducksack) {
+	urls := []string{
+		"https://www.slashgear.com/1896648/lifesaber-emergency-tool-usb-powered-features/",
+		"https://www.wusa9.com/article/news/nation-world/trump-big-bill-may-have-political-cost/507-0c07fc4b-248b-4a3b-96c0-81d75a511228",
+		"https://issuepay.app",
+		"https://minutemirror.com.pk/lahore-high-court-halts-transfer-of-brazilian-monkeys-to-lahore-zoo-406544/",
+		"https://jameshard.ing/pilot",
+		"https://jobsbyreferral.com/",
+		"https://llmapitest.com/",
+		"https://htmlrev.com/",
+	}
+
+	pp.Println("CATEGORIES", ds.QueryCategories(urls))
+	pp.Println("SENTIMENTS", ds.QuerySentiments(urls))
+	pp.Println("RELATED", ds.QueryClusters(urls))
+	pp.Println("REGIONS", ds.QueryRegions(urls))
+	pp.Println("ENTITIES", ds.QueryEntities(urls))
+	pp.Println("GISTS", ds.QueryGists(urls))
+	pp.Println("BEAN AGGREGATES", ds.QueryBeans(urls))
+}
+
+func main() {
+	// initialize database if needed
+	init, err := os.ReadFile("./factory/init.sql")
+	noerror(err)
+	dim := 384
+	dbpath := ".cache/test.db"
+	initsql := fmt.Sprintf(string(init), dim, dim, "./factory/categories.parquet", dim, "./factory/sentiments.parquet")
+
+	ds := NewDucksack(dbpath, initsql, dim)
+	defer ds.Close()
+
+	// hydrateTestDB(ds)
+	// testDistinctQueries(ds)
+	// testChatterStats(ds)
+	// testQueryBeanExtensions(ds)
+	pp.Println(ds.StreamBeans(NEWS, time.Now().AddDate(0, 0, -7), 10, 10))
 
 	// titles := []string{
 	// 	"Synthflow AI is bringing 'conversational' voice agents to call centers. Read the pitch deck that it used to raise $20 million.",
@@ -109,16 +155,16 @@ func main() {
 	// entities := ds.QueryTags(urls, BEAN_ENTITIES)
 	// pp.Println(entities)
 
-	urls := []string{
-		"https://www.slashgear.com/1896648/lifesaber-emergency-tool-usb-powered-features/",
-		"https://www.wusa9.com/article/news/nation-world/trump-big-bill-may-have-political-cost/507-0c07fc4b-248b-4a3b-96c0-81d75a511228",
-		"https://issuepay.app",
-		"https://minutemirror.com.pk/lahore-high-court-halts-transfer-of-brazilian-monkeys-to-lahore-zoo-406544/",
-		"https://jameshard.ing/pilot",
-		"https://jobsbyreferral.com/",
-		"https://llmapitest.com/",
-		"https://htmlrev.com/",
-	}
+	// urls := []string{
+	// 	"https://www.slashgear.com/1896648/lifesaber-emergency-tool-usb-powered-features/",
+	// 	"https://www.wusa9.com/article/news/nation-world/trump-big-bill-may-have-political-cost/507-0c07fc4b-248b-4a3b-96c0-81d75a511228",
+	// 	"https://issuepay.app",
+	// 	"https://minutemirror.com.pk/lahore-high-court-halts-transfer-of-brazilian-monkeys-to-lahore-zoo-406544/",
+	// 	"https://jameshard.ing/pilot",
+	// 	"https://jobsbyreferral.com/",
+	// 	"https://llmapitest.com/",
+	// 	"https://htmlrev.com/",
+	// }
 
 	// embeddings := ds.QueryBeanEmbeddings(urls)
 	// for _, embedding := range embeddings {
@@ -144,8 +190,8 @@ func main() {
 	// pp.Println("ENTITIES", ds.QueryEntities(urls))
 	// pp.Println("GISTS", ds.QueryGists(urls))
 
-	start := time.Now()
-	res := ds.QueryBeansWithExtensions(urls)
-	pp.Println("BEAN AGGREGATES", res, time.Since(start))
+	// start := time.Now()
+	// res := ds.QueryBeansWithExtensions(urls)
+	// pp.Println("BEAN AGGREGATES", res, time.Since(start))
 
 }
