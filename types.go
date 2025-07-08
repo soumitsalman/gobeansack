@@ -15,12 +15,12 @@ const (
 	COMMENT   = "comment"
 )
 
-type Vector []float32
-type Tags []string
+type Float32Array []float32
+type StringArray []string
 
 type EmbeddingData struct {
-	URL       string `db:"url" bson:"url"`
-	Embedding Vector `db:"embedding" bson:"embedding" json:"embedding"`
+	URL       string       `db:"url" bson:"url"`
+	Embedding Float32Array `db:"embedding" bson:"embedding" json:"embedding"`
 }
 
 type TagData struct {
@@ -44,28 +44,28 @@ type Bean struct {
 }
 
 type ExtendedBean struct {
-	URL           string    `db:"url"`
-	Kind          string    `db:"kind"`
-	Title         string    `db:"title"`
-	TitleLength   int       `db:"title_length" bson:"num_words_in_title"`
-	Summary       string    `db:"summary"`
-	SummaryLength int       `db:"summary_length" bson:"num_words_in_summary"`
-	Author        string    `db:"author"`
-	Source        string    `db:"source"`
-	Created       time.Time `db:"created" bson:"created"`
-	Collected     time.Time `db:"collected" bson:"collected"`
-	Embedding     Vector    `db:"embedding"`
-	Categories    Tags      `db:"categories"`
-	Sentiments    Tags      `db:"sentiments"`
-	Related       Tags      `db:"related"`
-	Gist          string    `db:"gist"`
-	Regions       Tags      `db:"regions"`
-	Entities      Tags      `db:"entities"`
-	// Updated       time.Time `db:"updated"` // last time some chatter was collected
-	// Likes         int       `db:"total_likes"`
-	// Comments      int       `db:"total_comments"`
-	// Subscribers   int       `db:"total_subscribers"`
-	// Shares        int       `db:"total_shares"`
+	URL           string       `db:"url"`
+	Kind          string       `db:"kind"`
+	Title         string       `db:"title"`
+	TitleLength   int          `db:"title_length" bson:"num_words_in_title"`
+	Summary       string       `db:"summary"`
+	SummaryLength int          `db:"summary_length" bson:"num_words_in_summary"`
+	Author        string       `db:"author"`
+	Source        string       `db:"source"`
+	Created       time.Time    `db:"created" bson:"created"`
+	Collected     time.Time    `db:"collected" bson:"collected"`
+	Embedding     Float32Array `db:"embedding"`
+	Categories    StringArray  `db:"categories"`
+	Sentiments    StringArray  `db:"sentiments"`
+	Related       StringArray  `db:"related"`
+	Gist          string       `db:"gist"`
+	Regions       StringArray  `db:"regions"`
+	Entities      StringArray  `db:"entities"`
+	Updated       time.Time    `db:"updated"` // last time some chatter was collected
+	Likes         int          `db:"likes"`
+	Comments      int          `db:"comments"`
+	Subscribers   int          `db:"subscribers"`
+	Shares        int          `db:"shares"`
 }
 
 type GeneratedBean struct {
@@ -89,12 +89,12 @@ type Chatter struct {
 }
 
 type ChatterAggregate struct {
-	URL           string    `db:"url"`            // url of the bean
-	LastCollected time.Time `db:"last_collected"` // last time some chatter was collected
-	Likes         int       `db:"total_likes"`
-	Comments      int       `db:"total_comments"`
-	Subscribers   int       `db:"total_subscribers"`
-	Shares        int       `db:"total_shares"`
+	URL         string    `db:"url"`       // url of the bean
+	Collected   time.Time `db:"collected"` // last time some chatter was collected
+	Likes       int       `db:"likes"`
+	Comments    int       `db:"comments"`
+	Subscribers int       `db:"subscribers"`
+	Shares      int       `db:"shares"`
 }
 
 type Source struct {
@@ -106,12 +106,12 @@ type Source struct {
 	RSSFeed     string `db:"rss_feed" bson:"site_rss_feed"`
 }
 
-func (vec Tags) Value() (driver.Value, error) {
+func (vec StringArray) Value() (driver.Value, error) {
 	bytes, err := json.Marshal(vec)
 	return driver.Value(string(bytes)), err
 }
 
-func (vec *Tags) Scan(value interface{}) error {
+func (vec *StringArray) Scan(value interface{}) error {
 	if value == nil {
 		*vec = nil
 		return nil
@@ -133,7 +133,7 @@ func (vec *Tags) Scan(value interface{}) error {
 	return nil
 }
 
-func (vec Vector) Value() (driver.Value, error) {
+func (vec Float32Array) Value() (driver.Value, error) {
 	if len(vec) == 0 {
 		return driver.Value(nil), fmt.Errorf("vector cannot be nil or empty")
 	}
@@ -141,7 +141,7 @@ func (vec Vector) Value() (driver.Value, error) {
 	return driver.Value(string(bytes)), err
 }
 
-func (vec *Vector) Scan(value interface{}) error {
+func (vec *Float32Array) Scan(value interface{}) error {
 	if value == nil {
 		*vec = nil
 		return nil

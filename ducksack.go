@@ -375,7 +375,7 @@ func (ds *Ducksack) VectorSearchBeans(embedding []float32, limit int) []Embeddin
 	ORDER BY array_cosine_distance(embedding, ?::FLOAT[%d])
 	LIMIT ?`
 	sql := fmt.Sprintf(_SQL_VECTOR_SEARCH_BEANS, len(embedding))
-	return mustSelect[EmbeddingData](ds, sql, Vector(embedding), limit)
+	return mustSelect[EmbeddingData](ds, sql, Float32Array(embedding), limit)
 }
 
 func (ds *Ducksack) Close() {

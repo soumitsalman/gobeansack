@@ -67,22 +67,41 @@ CREATE TABLE IF NOT EXISTS chatters (
 );
 
 CREATE VIEW IF NOT EXISTS chatter_aggregates AS
+WITH 
+    max_stats AS (
+        SELECT 
+            chatter_url,
+            MAX(likes) as likes, 
+            MAX(comments) as comments,
+        FROM chatters 
+        GROUP BY chatter_url
+    ),
+    first_seen AS (
+        SELECT 
+            chatter_url,
+            MIN(collected) as collected
+        FROM chatters fs 
+        LEFT JOIN max_stats mx ON fs.chatter_url = mx.chatter_url
+        WHERE fs.likes = mx.likes AND fs.comments = mx.comments
+        GROUP BY chatter_url
+    )
 SELECT 
     bean_url as url,
-    MAX(collected) as last_collected,
-    SUM(likes) as total_likes, 
-    SUM(comments) as total_comments, 
-    SUM(subscribers) as total_subscribers,
-    COUNT(chatter_url) as total_shares
+    MAX(collected) as collected,
+    SUM(likes) as likes, 
+    SUM(comments) as comments, 
+    SUM(subscribers) as subscribers,
+    COUNT(chatter_url) as shares
 FROM(
-    SELECT chatter_url,
-        FIRST(bean_url) as bean_url, 
-        MAX(collected) as collected, 
-        MAX(likes) as likes, 
-        MAX(comments) as comments,
-        MAX(subscribers) as subscribers
-    FROM chatters 
-    GROUP BY chatter_url
+    SELECT 
+        chatter_url,
+        bean_url, 
+        collected, 
+        likes, 
+        comments,
+        subscribers
+    FROM chatters ch 
+    LEFT JOIN first_seen fs ON fs.chatter_url = chatter_url, fs.collected = collected
 ) 
 GROUP BY bean_url;
 
@@ -138,7 +157,12 @@ SELECT
     cl.related,
     g.gist,
     r.regions,
-    n.entities
+    n.entities,
+    COALESCE(ch.collected, b.collected) as updated,
+    COALESCE(ch.likes, 0) as likes,
+    COALESCE(ch.comments, 0) as comments,
+    COALESCE(ch.subscribers, 0) as subscribers,
+    COALESCE(ch.shares, 0) as shares
 FROM beans b
 LEFT JOIN bean_embeddings e ON b.url = e.url
 LEFT JOIN (
@@ -157,5 +181,5 @@ LEFT JOIN (
 LEFT JOIN (
 	SELECT url, LIST(entity) as entities FROM bean_entities GROUP BY url
 ) as n ON b.url = n.url
--- LEFT JOIN chatter_aggregates ch ON b.url = ch.url
+LEFT JOIN chatter_aggregates ch ON b.url = ch.url
 ;
