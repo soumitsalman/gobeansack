@@ -28,28 +28,30 @@ type TagData struct {
 	Tag string `db:"tag"`
 }
 
-type Bean struct {
-	URL           string    `db:"url"`
-	Kind          string    `db:"kind"`
-	Title         string    `db:"title"`
-	TitleLength   int       `db:"title_length" bson:"num_words_in_title"`
-	Content       string    `db:"content"`
-	ContentLength int       `db:"content_length" bson:"num_words_in_content"`
-	Summary       string    `db:"summary"`
-	SummaryLength int       `db:"summary_length" bson:"num_words_in_summary"`
-	Author        string    `db:"author"`
-	Source        string    `db:"source"`
-	Created       time.Time `db:"created" bson:"created"`
-	Collected     time.Time `db:"collected" bson:"collected"`
-}
+// type Bean struct {
+// 	URL           string    `db:"url"`
+// 	Kind          string    `db:"kind"`
+// 	Title         string    `db:"title"`
+// 	TitleLength   int       `db:"title_length" bson:"num_words_in_title"`
+// 	Content       string    `db:"content"`
+// 	ContentLength int       `db:"content_length" bson:"num_words_in_content"`
+// 	Summary       string    `db:"summary"`
+// 	SummaryLength int       `db:"summary_length" bson:"num_words_in_summary"`
+// 	Author        string    `db:"author"`
+// 	Source        string    `db:"source"`
+// 	Created       time.Time `db:"created" bson:"created"`
+// 	Collected     time.Time `db:"collected" bson:"collected"`
+// }
 
-type ExtendedBean struct {
+type Bean struct {
 	URL           string       `db:"url"`
 	Kind          string       `db:"kind"`
 	Title         string       `db:"title"`
 	TitleLength   int          `db:"title_length" bson:"num_words_in_title"`
 	Summary       string       `db:"summary"`
 	SummaryLength int          `db:"summary_length" bson:"num_words_in_summary"`
+	Content       string       `db:"content"`
+	ContentLength int          `db:"content_length" bson:"num_words_in_content"`
 	Author        string       `db:"author"`
 	Source        string       `db:"source"`
 	Created       time.Time    `db:"created" bson:"created"`

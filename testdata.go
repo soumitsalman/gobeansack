@@ -11,7 +11,7 @@ var ctx = context.Background()
 
 func getMongoCollection(database string, collection string) *mongo.Collection {
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
-	noerror(err)
+	noerror(err, "MONGO CONNECT ERROR")
 	db := client.Database(database)
 	return db.Collection(collection)
 }
@@ -26,13 +26,13 @@ func mongoFind[T any](db string, collection string, filter interface{}, limit in
 	coll := getMongoCollection(db, collection)
 	find_options := options.Find().SetLimit(limit).SetProjection(projection)
 	cursor, err := coll.Find(ctx, filter, find_options)
-	noerror(err)
+	noerror(err, "MONGO FIND ERROR")
 	defer cursor.Close(ctx)
 	items := []T{}
 	for cursor.Next(ctx) {
 		var item T
 		err := cursor.Decode(&item)
-		noerror(err)
+		noerror(err, "MONGO DECODE ERROR")
 		items = append(items, item)
 	}
 	return items
@@ -91,16 +91,22 @@ func getTestBeans(limit int64) []Bean {
 		},
 		limit,
 		map[string]interface{}{
-			"url":       1,
-			"title":     1,
-			"content":   1,
-			"summary":   1,
-			"created":   1,
-			"updated":   1,
-			"collected": 1,
-			"kind":      1,
-			"source":    1,
-			"author":    1,
+			"url":        1,
+			"title":      1,
+			"content":    1,
+			"summary":    1,
+			"created":    1,
+			"updated":    1,
+			"collected":  1,
+			"kind":       1,
+			"source":     1,
+			"author":     1,
+			"embedding":  1,
+			"categories": 1,
+			"sentiments": 1,
+			"regions":    1,
+			"entities":   1,
+			"gist":       1,
 		},
 	)
 }

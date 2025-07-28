@@ -1,11 +1,12 @@
 package main
 
 import (
-	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/k0kubun/pp"
+	datautils "github.com/soumitsalman/data-utils"
 )
 
 func flattenTags(url string, data []string) []TagData {
@@ -16,36 +17,43 @@ func flattenTags(url string, data []string) []TagData {
 	return tags
 }
 
-func prepareTags(digests []Digest) map[string][]TagData {
+func prepareTags(beans []Bean) map[string][]TagData {
 	// rough initialization
 	results := map[string][]TagData{
-		"categories": make([]TagData, 0, 3*len(digests)),
-		"sentiments": make([]TagData, 0, 3*len(digests)),
-		"regions":    make([]TagData, 0, 3*len(digests)),
-		"entities":   make([]TagData, 0, 3*len(digests)),
-		"gist":       make([]TagData, 0, len(digests)),
+		"categories": make([]TagData, 0, 3*len(beans)),
+		"sentiments": make([]TagData, 0, 3*len(beans)),
+		"regions":    make([]TagData, 0, 3*len(beans)),
+		"entities":   make([]TagData, 0, 3*len(beans)),
+		"gist":       make([]TagData, 0, len(beans)),
 	}
-	for _, digest := range digests {
-		results["categories"] = append(results["categories"], flattenTags(digest.URL, digest.Categories)...)
-		results["sentiments"] = append(results["sentiments"], flattenTags(digest.URL, digest.Sentiments)...)
-		results["regions"] = append(results["regions"], flattenTags(digest.URL, digest.Regions)...)
-		results["entities"] = append(results["entities"], flattenTags(digest.URL, digest.Entities)...)
-		results["gist"] = append(results["gist"], TagData{URL: digest.URL, Tag: digest.Gist})
+	for _, bean := range beans {
+		results["categories"] = append(results["categories"], flattenTags(bean.URL, bean.Categories)...)
+		results["sentiments"] = append(results["sentiments"], flattenTags(bean.URL, bean.Sentiments)...)
+		results["regions"] = append(results["regions"], flattenTags(bean.URL, bean.Regions)...)
+		results["entities"] = append(results["entities"], flattenTags(bean.URL, bean.Entities)...)
+		results["gist"] = append(results["gist"], TagData{URL: bean.URL, Tag: bean.Gist})
 	}
 	return results
 }
 
 func hydrateTestDB(ds *Ducksack) {
-	var importnum int64 = 50000
-	ds.StoreBeans(getTestBeans(importnum))
-	embeddings := getTestEmbeddings(importnum)
-	ds.StoreEmbeddings(embeddings)
-	ds.RectifyExtendedFields(embeddings, 3, 0.43)
-	ds.StoreChatters(getTestChatters(400000))
-	ds.StoreSources(getTestSources(importnum))
-	digests := getTestDigests(importnum)
-	tags := prepareTags(digests)
+	var importnum int64 = 60000
 
+	beans := getTestBeans(importnum)
+	ds.StoreBeans(beans)
+	embs := datautils.Filter(beans, func(b *Bean) bool {
+		return len(b.Embedding) > 0
+	})
+	ds.StoreEmbeddings(embs)
+
+	tags := prepareTags(beans)
+
+	if categories, ok := tags["categories"]; ok && len(categories) > 0 {
+		ds.StoreTags(categories, BEAN_CATEGORIES)
+	}
+	if sentiments, ok := tags["sentiments"]; ok && len(sentiments) > 0 {
+		ds.StoreTags(sentiments, BEAN_SENTIMENTS)
+	}
 	if regions, ok := tags["regions"]; ok && len(regions) > 0 {
 		ds.StoreTags(regions, BEAN_REGIONS)
 	}
@@ -55,13 +63,18 @@ func hydrateTestDB(ds *Ducksack) {
 	if gist, ok := tags["gist"]; ok && len(gist) > 0 {
 		ds.StoreTags(gist, BEAN_GISTS)
 	}
+
+	// ds.RectifyExtendedFields(beans, 3, 0.43)
+	ds.StoreChatters(getTestChatters(400000))
+	ds.StoreSources(getTestSources(importnum))
+	// digests := getTestDigests(importnum)
 }
 
 func testQueryDistinctValues(ds *Ducksack) {
-	pp.Println("REGIONS", ds.DistinctRegions()[:3])
-	pp.Println("ENTITIES", ds.DistinctEntities()[:3])
-	pp.Println("SOURCES", ds.DistinctSources()[:3])
-	pp.Println("CATEGORIES", ds.DistinctCategories()[:3])
+	pp.Println("REGIONS", ds.DistinctRegions()[:5])
+	pp.Println("ENTITIES", ds.DistinctEntities()[:5])
+	pp.Println("SOURCES", ds.DistinctSources()[:5])
+	pp.Println("CATEGORIES", ds.DistinctCategories()[:5])
 }
 
 func testQueryChatterStats(ds *Ducksack) {
@@ -76,8 +89,8 @@ func testQueryChatterStats(ds *Ducksack) {
 		"https://htmlrev.com/",
 	}
 
-	pp.Println("CHATTERS", ds.QueryChatters(urls)[:5])
-	pp.Println("AGGREGATES", ds.QueryChatterAggregates(urls))
+	pp.Println("CHATTERS", ds.GetChatters(urls)[:5])
+	pp.Println("AGGREGATES", ds.GetBeanChatters(urls))
 }
 
 func testQueryBeanExtensions(ds *Ducksack) {
@@ -92,31 +105,47 @@ func testQueryBeanExtensions(ds *Ducksack) {
 		"https://htmlrev.com/",
 	}
 
-	pp.Println("CATEGORIES", ds.QueryCategories(urls))
-	pp.Println("SENTIMENTS", ds.QuerySentiments(urls))
-	pp.Println("RELATED", ds.QueryClusters(urls))
-	pp.Println("REGIONS", ds.QueryRegions(urls))
-	pp.Println("ENTITIES", ds.QueryEntities(urls))
-	pp.Println("GISTS", ds.QueryGists(urls))
-	pp.Println("BEAN AGGREGATES", ds.QueryBeans(urls))
+	pp.Println("CATEGORIES", ds.GetCategories(urls))
+	pp.Println("SENTIMENTS", ds.GetSentiments(urls))
+	pp.Println("RELATED", ds.GetClusters(urls))
+	pp.Println("REGIONS", ds.GetRegions(urls))
+	pp.Println("ENTITIES", ds.GetEntities(urls))
+	pp.Println("GISTS", ds.GetGists(urls))
+	pp.Println("BEAN AGGREGATES", ds.GetBeans(urls))
+	pp.Println("BEAN CLUSTERS", ds.GetClusters(urls))
+}
+
+func testStreamBeans(ds *Ducksack) {
+	categories := []string{"Artificial Intelligence", "Cloud Computing"}
+	entities := []string{"ChatGPT", "Elon Musk"}
+	for i := int64(0); i < 5; i++ {
+		datautils.PrintTable(
+			ds.StreamBeans(NEWS, time.Now().AddDate(0, 0, -45), categories, []string{}, entities, i*5, 6),
+			[]string{"kind", "title", "categories", "entities"},
+			func(b *Bean) []string {
+				return []string{b.Kind, b.Title, strings.Join(b.Categories, ", "), strings.Join(b.Entities, ", ")}
+			},
+		)
+	}
 }
 
 func main() {
 	// initialize database if needed
 	init, err := os.ReadFile("./factory/init.sql")
-	noerror(err)
-	dim := 384
-	dbpath := ".cache/test.db"
-	initsql := fmt.Sprintf(string(init), dim, dim, "./factory/categories.parquet", dim, "./factory/sentiments.parquet")
+	noerror(err, "READ SQL ERROR")
+	var dim int = 384
+	var cluster_eps float32 = 0.43
+	dbpath := ".cache/test.db" // "./.ducklake/"
+	initsql := string(init)    // fmt.Sprintf(string(init), dim)
 
-	ds := NewDucksack(dbpath, initsql, dim)
+	ds := NewBeansack(dbpath, initsql, dim, cluster_eps)
 	defer ds.Close()
 
 	// hydrateTestDB(ds)
-	// testDistinctQueries(ds)
-	// testChatterStats(ds)
+	// testQueryDistinctValues(ds)
+	// testQueryChatterStats(ds)
 	// testQueryBeanExtensions(ds)
-	pp.Println(ds.StreamBeans(NEWS, time.Now().AddDate(0, 0, -7), 10, 10))
+	testStreamBeans(ds)
 
 	// titles := []string{
 	// 	"Synthflow AI is bringing 'conversational' voice agents to call centers. Read the pitch deck that it used to raise $20 million.",

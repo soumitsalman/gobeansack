@@ -1,3 +1,5 @@
 *.env
 *.log
 *.cache
+*.db
+*.ducklake
