@@ -2,29 +2,83 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 
+	datautils "github.com/soumitsalman/data-utils"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+const (
+	DEFAULT_DB_NAME  = "master"
+	DEFAULT_CONN_STR = "mongodb://localhost:27017"
+)
+
 var ctx = context.Background()
 
-func getMongoCollection(database string, collection string) *mongo.Collection {
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
+func hydrateTestDB(ds *Ducksack) {
+	var importnum int64 = 10000
+
+	for i := int64(0); i < 50; i++ {
+		beans := getTestBeans(i*importnum, importnum)
+		ds.StoreBeans(beans)
+		embs := datautils.Filter(beans, func(b *Bean) bool {
+			return len(b.Embedding) > 0
+		})
+		ds.StoreEmbeddings(embs)
+
+		tags := prepareTags(beans)
+
+		if categories, ok := tags["categories"]; ok && len(categories) > 0 {
+			ds.StoreTags(categories, BEAN_CATEGORIES)
+		}
+		if sentiments, ok := tags["sentiments"]; ok && len(sentiments) > 0 {
+			ds.StoreTags(sentiments, BEAN_SENTIMENTS)
+		}
+		if regions, ok := tags["regions"]; ok && len(regions) > 0 {
+			ds.StoreTags(regions, BEAN_REGIONS)
+		}
+		if entities, ok := tags["entities"]; ok && len(entities) > 0 {
+			ds.StoreTags(entities, BEAN_ENTITIES)
+		}
+		if gist, ok := tags["gist"]; ok && len(gist) > 0 {
+			ds.StoreTags(gist, BEAN_GISTS)
+		}
+	}
+
+	// ds.RectifyExtendedFields(beans, 3, 0.43)
+	ds.StoreChatters(getTestChatters(0, 400000))
+	// ds.StoreSources(getTestSources(importnum))
+	// digests := getTestDigests(importnum)
+}
+
+func getMongoCollection(collection string) *mongo.Collection {
+	connstr := os.Getenv("MONGODB_CONN_STR")
+	if connstr == "" {
+		connstr = DEFAULT_CONN_STR
+	}
+	fmt.Println(connstr)
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(connstr))
 	noerror(err, "MONGO CONNECT ERROR")
-	db := client.Database(database)
+	dbname := os.Getenv("DB_NAME")
+	fmt.Println(dbname)
+	if dbname == "" {
+		dbname = DEFAULT_DB_NAME
+	}
+	db := client.Database(dbname)
 	return db.Collection(collection)
 }
 
-func mongoFind[T any](db string, collection string, filter interface{}, limit int64, projection interface{}) []T {
+func mongoFind[T any](collection string, filter interface{}, skip int64, limit int64, projection interface{}) []T {
 	if filter == nil {
 		filter = map[string]interface{}{}
 	}
 	if projection == nil {
 		projection = map[string]interface{}{}
 	}
-	coll := getMongoCollection(db, collection)
-	find_options := options.Find().SetLimit(limit).SetProjection(projection)
+	coll := getMongoCollection(collection)
+	find_options := options.Find().SetSkip(skip).SetLimit(limit).SetProjection(projection)
 	cursor, err := coll.Find(ctx, filter, find_options)
 	noerror(err, "MONGO FIND ERROR")
 	defer cursor.Close(ctx)
@@ -38,48 +92,8 @@ func mongoFind[T any](db string, collection string, filter interface{}, limit in
 	return items
 }
 
-// func getTestBeans(limit int64) []Bean {
-// 	collection := getMongoCollection("20250701", "beans")
-// 	find_options := options.Find().SetLimit(limit).SetProjection(map[string]interface{}{
-// 		"_id":       0,
-// 		"url":       1,
-// 		"title":     1,
-// 		"content":   1,
-// 		"summary":   1,
-// 		"created":   1,
-// 		"updated":   1,
-// 		"collected": 1,
-// 		"kind":      1,
-// 		"source":    1,
-// 		"author":    1,
-// 	})
-// 	cursor, err := collection.Find(
-// 		ctx,
-// 		map[string]interface{}{
-// 			"content": map[string]interface{}{
-// 				"$exists": true,
-// 			},
-// 			"summary": map[string]interface{}{
-// 				"$exists": true,
-// 			},
-// 		},
-// 		find_options,
-// 	)
-// 	noerror(err)
-// 	defer cursor.Close(ctx)
-// 	beans := []Bean{}
-// 	for cursor.Next(ctx) {
-// 		var bean Bean
-// 		err := cursor.Decode(&bean)
-// 		noerror(err)
-// 		beans = append(beans, bean)
-// 	}
-// 	return beans
-// }
-
-func getTestBeans(limit int64) []Bean {
-	return mongoFind[Bean](
-		"master",
+func getTestBeans(skip int64, limit int64) []Bean {
+	beans := mongoFind[Bean](
 		"beans",
 		map[string]interface{}{
 			"content": map[string]interface{}{
@@ -89,6 +103,7 @@ func getTestBeans(limit int64) []Bean {
 				"$exists": true,
 			},
 		},
+		skip,
 		limit,
 		map[string]interface{}{
 			"url":        1,
@@ -109,17 +124,26 @@ func getTestBeans(limit int64) []Bean {
 			"gist":       1,
 		},
 	)
+	for _, bean := range beans {
+		if len(bean.MongoEmbedding) > 0 {
+			bean.Embedding = make(Float32Array, len(bean.MongoEmbedding))
+			for i, v := range bean.MongoEmbedding {
+				bean.Embedding[i] = float32(v)
+			}
+		}
+	}
+	return beans
 }
 
-func getTestEmbeddings(limit int64) []EmbeddingData {
+func getTestEmbeddings(skip int64, limit int64) []EmbeddingData {
 	return mongoFind[EmbeddingData](
-		"master",
 		"beans",
 		map[string]interface{}{
 			"embedding": map[string]interface{}{
 				"$exists": true,
 			},
 		},
+		skip,
 		limit,
 		map[string]interface{}{
 			"url":       1,
@@ -127,33 +151,6 @@ func getTestEmbeddings(limit int64) []EmbeddingData {
 		},
 	)
 }
-
-// func getTestEmbeddings(limit int64) []EmbeddingData {
-// 	collection := getMongoCollection("20250702", "beans")
-// 	find_options := options.Find().SetLimit(limit).SetProjection(map[string]interface{}{
-// 		"_id":       1,
-// 		"embedding": 1,
-// 	})
-// 	cursor, err := collection.Find(
-// 		ctx,
-// 		map[string]interface{}{
-// 			"embedding": map[string]interface{}{
-// 				"$exists": true,
-// 			},
-// 		},
-// 		find_options,
-// 	)
-// 	noerror(err)
-// 	defer cursor.Close(ctx)
-// 	embeddings := []EmbeddingData{}
-// 	for cursor.Next(ctx) {
-// 		var item EmbeddingData
-// 		err := cursor.Decode(&item)
-// 		noerror(err)
-// 		embeddings = append(embeddings, item)
-// 	}
-// 	return embeddings
-// }
 
 type Digest struct {
 	URL        string   `bson:"url"`
@@ -164,15 +161,15 @@ type Digest struct {
 	Entities   []string `bson:"entities"`
 }
 
-func getTestDigests(limit int64) []Digest {
+func getTestDigests(skip int64, limit int64) []Digest {
 	digests := mongoFind[Digest](
-		"master",
 		"beans",
 		map[string]interface{}{
 			"gist": map[string]interface{}{
 				"$exists": true,
 			},
 		},
+		skip,
 		limit,
 		map[string]interface{}{
 			"url":        1,
@@ -186,9 +183,8 @@ func getTestDigests(limit int64) []Digest {
 	return digests
 }
 
-func getTestChatters(limit int64) []Chatter {
+func getTestChatters(skip int64, limit int64) []Chatter {
 	chatters := mongoFind[Chatter](
-		"master",
 		"chatters",
 		map[string]interface{}{
 			"likes": map[string]interface{}{
@@ -198,6 +194,7 @@ func getTestChatters(limit int64) []Chatter {
 				"$exists": true,
 			},
 		},
+		skip,
 		limit,
 		nil,
 	)
@@ -205,7 +202,7 @@ func getTestChatters(limit int64) []Chatter {
 	return chatters
 }
 
-func getTestSources(limit int64) []Source {
-	sources := mongoFind[Source]("master", "sources", nil, limit, nil)
+func getTestSources(skip int64, limit int64) []Source {
+	sources := mongoFind[Source]("sources", nil, skip, limit, nil)
 	return sources
 }

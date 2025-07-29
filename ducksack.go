@@ -57,7 +57,7 @@ type Ducksack struct {
 // 	}
 // }
 
-func NewBeansack(datapath string, initsql string, vectordim int, cluster_eps float32) *Ducksack {
+func NewBeansack(datapath string, initsql string, vectordim int, cluster_eps float64) *Ducksack {
 	conn, err := duckdb.NewConnector(fmt.Sprintf("%s?threads=%d", datapath, max(1, runtime.NumCPU()-1)), nil)
 	noerror(err, "CONNECTOR ERROR")
 
@@ -257,43 +257,16 @@ func updateItems(ds *Ducksack, expr string, urls []string) {
 	noerror(err, "UPDATE ERROR")
 }
 
-////////// QUERY FUNCTIONS //////////
+////////// DIRECT QUERY/GET FUNCTIONS //////////
 
 func (ds *Ducksack) Exists(urls []string) []string {
-	return queryItems[string](ds, "SELECT url FROM bean_cores WHERE url IN (?)", urls)
+	return queryItems[string](ds, "SELECT url FROM bean_cores WHERE url IN (?);", urls)
 }
-
-// func (ds *Ducksack) QueryBeans(urls []string) []Bean {
-// 	return queryItems[Bean](ds, "SELECT * FROM beans WHERE url IN (?)", urls)
-// }
 
 func (ds *Ducksack) GetBeans(urls []string) []Bean {
 	const _SQL_QUERY_BEANS = `
-	SELECT
-		url, 
-		FIRST(kind) as kind, 
-		FIRST(title) as title, 
-		FIRST(title_length) as title_length, 
-		FIRST(summary) as summary, 
-		FIRST(summary_length) as summary_length, 
-		FIRST(author) as author, 
-		FIRST(source) as source, 
-		FIRST(created) as created, 
-		FIRST(collected) as collected,
-		FIRST(embedding) as embedding,
-		LIST(DISTINCT category) as categories,
-		LIST(DISTINCT sentiment) as sentiments,
-		FIRST(gist) as gist,
-		LIST(DISTINCT region) as regions,
-		LIST(DISTINCT entity) as entities,
-		FIRST(updated) as updated, 
-		FIRST(likes) as likes, 
-		FIRST(comments) as comments, 
-		FIRST(subscribers) as subscribers, 
-		FIRST(shares) as shares
-	FROM bean_aggregates
-	WHERE url IN (?)
-	GROUP BY url;`
+	SELECT * FROM bean_aggregates
+	WHERE url IN (?);`
 	return queryItems[Bean](ds, _SQL_QUERY_BEANS, urls)
 }
 
@@ -307,33 +280,33 @@ func (ds *Ducksack) GetGists(urls []string) []Bean {
 
 func (ds *Ducksack) GetRegions(urls []string) []Bean {
 	const _SQL_QUERY_REGIONS = `
-	SELECT url, LIST(region) AS regions FROM bean_regions
-	WHERE url IN (?) GROUP BY url;`
+	SELECT url, regions FROM bean_aggregates
+	WHERE url IN (?);`
 	return queryItems[Bean](ds, _SQL_QUERY_REGIONS, urls)
 }
 
 func (ds *Ducksack) GetEntities(urls []string) []Bean {
 	const _SQL_QUERY_ENTITIES = `
-	SELECT url, LIST(entity) AS entities FROM bean_entities
-	WHERE url IN (?) GROUP BY url;`
+	SELECT url, entities FROM bean_aggregates
+	WHERE url IN (?);`
 	return queryItems[Bean](ds, _SQL_QUERY_ENTITIES, urls)
 }
 
 func (ds *Ducksack) GetCategories(urls []string) []Bean {
 	const _SQL_QUERY_CATEGORIES = `
-	SELECT url, LIST(category) AS categories FROM bean_categories 
-	WHERE url IN (?) GROUP BY url;`
+	SELECT url, categories FROM bean_aggregates
+	WHERE url IN (?);`
 	return queryItems[Bean](ds, _SQL_QUERY_CATEGORIES, urls)
 }
 
 func (ds *Ducksack) GetSentiments(urls []string) []Bean {
 	const _SQL_QUERY_SENTIMENTS = `
-	SELECT url, LIST(sentiment) AS sentiments FROM bean_sentiments 
-	WHERE url IN (?) GROUP BY url;`
+	SELECT url, sentiments FROM bean_aggregates
+	WHERE url IN (?);`
 	return queryItems[Bean](ds, _SQL_QUERY_SENTIMENTS, urls)
 }
 
-func (ds *Ducksack) GetClusters(urls []string) []Bean {
+func (ds *Ducksack) GetRelated(urls []string) []Bean {
 	const _SQL_QUERY_CLUSTERS = `
 	SELECT url, LIST(DISTINCT related) AS related FROM bean_clusters
 	WHERE url IN (?) 
@@ -341,15 +314,13 @@ func (ds *Ducksack) GetClusters(urls []string) []Bean {
 	return queryItems[Bean](ds, _SQL_QUERY_CLUSTERS, urls)
 }
 
-/////////// CHATTER QUERIES //////////
-
 func (ds *Ducksack) GetChatters(urls []string) []Chatter {
-	query, args := mustIn("SELECT * FROM chatters WHERE bean_url IN (?) ORDER BY collected DESC", urls)
+	query, args := mustIn("SELECT * FROM chatters WHERE bean_url IN (?) ORDER BY collected DESC;", urls)
 	return mustSelect[Chatter](ds, query, args...)
 }
 
 func (ds *Ducksack) GetBeanChatters(urls []string) []ChatterAggregate {
-	query, args := mustIn("SELECT * FROM bean_chatters WHERE url IN (?)", urls)
+	query, args := mustIn("SELECT * FROM bean_chatters WHERE url IN (?);", urls)
 	return mustSelect[ChatterAggregate](ds, query, args...)
 }
 
@@ -380,12 +351,44 @@ func (ds *Ducksack) DistinctSources() []string {
 	return mustSelect[string](ds, _SQL_GET_ALL_SOURCES)
 }
 
-//////////// STREAM QUERIES ///////////
+//////////// COMPOSITE QUERIES ///////////
 
-func (ds *Ducksack) StreamBeans(kind string, created_after time.Time, categories []string, regions []string, entities []string, offset int64, limit int64) []Bean {
+const _SQL_QUERY_BEAN_AGGREGATES = `SELECT * FROM bean_aggregates`
+
+func (ds *Ducksack) QueryBeans(kind string, created_after time.Time, categories []string, regions []string, entities []string, offset int64, limit int64) []Bean {
+	sql, where_params := addWhere(_SQL_QUERY_BEAN_AGGREGATES, kind, created_after, categories, regions, entities, 0)
+	sql, paging_params := addPagination(sql, offset, limit)
+	return mustSelect[Bean](ds, sql, append(where_params, paging_params...)...)
+}
+
+func (ds *Ducksack) VectorSearchBeans(embedding []float32, max_distance float64, kind string, created_after time.Time, categories []string, regions []string, entities []string, offset int64, limit int64) []Bean {
+	filtered_sql, params := addWhere(_SQL_QUERY_BEAN_AGGREGATES, kind, created_after, categories, regions, entities, 0)
+
+	distances_sql := `
+	SELECT *, array_cosine_distance(embedding, ?::FLOAT[%d]) AS distance 
+	FROM filtered
+	ORDER BY distance`
+	distances_sql, distances_where_params := addWhere(fmt.Sprintf(distances_sql, ds.dim), "", time.Time{}, nil, nil, nil, max_distance)
+	distances_sql, distances_pagination_params := addPagination(distances_sql, offset, limit)
+
+	params = append(params, Float32Array(embedding))
+	params = append(params, distances_where_params...)
+	params = append(params, distances_pagination_params...)
+
+	sql := `
+	WITH 
+		filtered AS ( %s ),
+		distances AS ( %s )
+	SELECT * EXCLUDE(distance) FROM distances;`
+	sql = fmt.Sprintf(sql, filtered_sql, distances_sql)
+
+	return mustSelect[Bean](ds, sql, params...)
+}
+
+func addWhere(base_sql string, kind string, created_after time.Time, categories []string, regions []string, entities []string, max_distance float64) (string, []any) {
 	params := []any{}
 	where_exprs := []string{}
-	where_sql := ""
+
 	if len(kind) > 0 {
 		where_exprs = append(where_exprs, "kind = ?")
 		params = append(params, kind)
@@ -406,106 +409,28 @@ func (ds *Ducksack) StreamBeans(kind string, created_after time.Time, categories
 		where_exprs = append(where_exprs, "ARRAY_HAS_ANY(entities, ?)")
 		params = append(params, StringArray(entities))
 	}
-	if len(where_exprs) > 0 {
-		where_sql = fmt.Sprintf("WHERE %s", strings.Join(where_exprs, " AND "))
+	if max_distance > 0 {
+		where_exprs = append(where_exprs, "distance <= ?")
+		params = append(params, max_distance)
 	}
-	params = append(params, max(0, offset), max(0, limit))
 
-	const _SQL_STREAM_BEANS = `
-	SELECT * FROM bean_aggregates
-	%s
-	ORDER BY created DESC
-	OFFSET ? LIMIT ?;`
-
-	sql := fmt.Sprintf(_SQL_STREAM_BEANS, where_sql)
-	return mustSelect[Bean](ds, sql, params...)
+	if len(where_exprs) > 0 {
+		base_sql = fmt.Sprintf("%s WHERE %s", base_sql, strings.Join(where_exprs, " AND "))
+	}
+	return base_sql, params
 }
 
-// // first take the chatters ONLY for the filtered urls
-// // then take the current chatters and group by id
-// // then then add/agg per bean
-// // take the ones that got updated in last 1 day
-// // take the chatters from 1 day ago per id
-// // then aggregate per bean
-// // then subtract
-// const _SQL_QUERY_CHATTER_UPDATES = `
-// WITH
-// filtered_chatters AS (
-//     SELECT * FROM chatters WHERE bean_url IN (?)
-// ),
-// current_agg AS (
-// 	SELECT
-//         bean_url,
-//         MAX(collected) as collected,
-//         SUM(likes) as likes,
-//         SUM(comments) as comments,
-//         SUM(subscribers) as subscribers,
-//         COUNT(chatter_url) as shares,
-
-//     FROM (
-// 		SELECT
-// 			chatter_url,
-// 			FIRST(bean_url) as bean_url,
-// 			MAX(collected) as collected,
-// 			MAX(likes) as likes,
-// 			MAX(comments) as comments,
-// 			MAX(subscribers) as subscribers
-// 		FROM filtered_chatters
-// 		GROUP BY chatter_url
-// 	)
-//     GROUP BY bean_url
-// ),
-// before_agg AS (
-// 	SELECT
-//         bean_url,
-//         MAX(collected) as collected,
-//         SUM(likes) as likes,
-//         SUM(comments) as comments,
-//         SUM(subscribers) as subscribers,
-//         COUNT(chatter_url) as shares
-//     FROM (
-// 		SELECT
-// 			chatter_url,
-// 			FIRST(bean_url) as bean_url,
-// 			MAX(collected) as collected,
-// 			MAX(likes) as likes,
-// 			MAX(comments) as comments,
-// 			MAX(subscribers) as subscribers
-// 		FROM filtered_chatters
-// 		WHERE collected + INTERVAL 1 DAY < CURRENT_TIMESTAMP
-// 		GROUP BY chatter_url
-// 	)
-//     GROUP BY bean_url
-// )
-// SELECT
-// 	ca.bean_url as url,
-// 	ca.collected as last_collected,
-// 	COALESCE(ca.likes, 0) - COALESCE(ba.likes, 0) as total_likes,
-// 	COALESCE(ca.comments, 0) - COALESCE(ba.comments, 0) as total_comments,
-// 	COALESCE(ca.subscribers, 0) - COALESCE(ba.subscribers, 0) as total_subscribers,
-// 	COALESCE(ca.shares, 0) - COALESCE(ba.shares, 0) as total_shares
-// FROM current_agg ca
-// LEFT JOIN before_agg ba
-// ON ca.bean_url = ba.bean_url
-// WHERE
-// 	ca.collected + INTERVAL 1 day >= CURRENT_TIMESTAMP AND
-// 	(total_likes > 0 OR total_comments > 0 OR total_subscribers > 0 OR total_shares > 0);
-// `
-
-// func (ds *Ducksack) QueryChatterUpdates(urls []string) []ChatterAggregate {
-// 	query, args := mustIn(_SQL_QUERY_CHATTER_UPDATES, urls)
-// 	return mustSelect[ChatterAggregate](ds, query, args...)
-// }
-
-////////// VECTOR SEARCH //////////
-
-func (ds *Ducksack) VectorSearchBeans(embedding []float32, limit int) []EmbeddingData {
-	const _SQL_VECTOR_SEARCH_BEANS = `
-	SELECT * FROM bean_embeddings
-	ORDER BY array_cosine_distance(embedding, ?::FLOAT[%d])
-	LIMIT ?`
-	sql := fmt.Sprintf(_SQL_VECTOR_SEARCH_BEANS, len(embedding))
-	return mustSelect[EmbeddingData](ds, sql, Float32Array(embedding), limit)
+func addPagination(base_sql string, offset int64, limit int64) (string, []any) {
+	params := []any{}
+	if offset > 0 {
+		base_sql = fmt.Sprintf("%s OFFSET ?", base_sql)
+		params = append(params, offset)
+	}
+	if limit > 0 {
+		base_sql = fmt.Sprintf("%s LIMIT ?", base_sql)
+		params = append(params, limit)
+	}
+	return base_sql, params
 }
 
 func (ds *Ducksack) Close() {

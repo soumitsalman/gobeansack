@@ -32,11 +32,11 @@ CREATE TABLE IF NOT EXISTS bean_embeddings (
     url VARCHAR NOT NULL PRIMARY KEY,
     embedding FLOAT[%d] NOT NULL
 );
+CREATE TABLE IF NOT EXISTS bean_gists (
+    url VARCHAR NOT NULL PRIMARY KEY,
+    gist TEXT NOT NULL
+);
 
--- CREATE TABLE IF NOT EXISTS bean_clusters (
---     url VARCHAR NOT NULL,
---     related VARCHAR NOT NULL
--- );
 CREATE TABLE IF NOT EXISTS bean_categories (
     url VARCHAR NOT NULL,
     category VARCHAR NOT NULL
@@ -44,10 +44,6 @@ CREATE TABLE IF NOT EXISTS bean_categories (
 CREATE TABLE IF NOT EXISTS bean_sentiments (
     url VARCHAR NOT NULL,
     sentiment VARCHAR NOT NULL
-);
-CREATE TABLE IF NOT EXISTS bean_gists (
-    url VARCHAR NOT NULL,
-    gist TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS bean_regions (
     url VARCHAR NOT NULL,
@@ -107,7 +103,8 @@ FROM(
     LEFT JOIN first_seen fs ON fs.chatter_url = ch.chatter_url  
     WHERE fs.collected = ch.collected
 ) 
-GROUP BY bean_url;
+GROUP BY bean_url
+ORDER BY collected DESC;
 
 CREATE TABLE IF NOT EXISTS sources (
     name VARCHAR,
@@ -149,8 +146,10 @@ SELECT
     be1.url as url, 
     be2.url as related, 
     array_distance(be1.embedding, be2.embedding) as distance
-FROM bean_embeddings be1 CROSS JOIN bean_embeddings be2
-WHERE be1.url != be2.url AND distance < %f;
+FROM bean_embeddings be1 
+CROSS JOIN bean_embeddings be2
+WHERE be1.url != be2.url AND distance <= %f
+ORDER BY distance;
 
 CREATE VIEW IF NOT EXISTS bean_aggregates AS
 SELECT
@@ -175,15 +174,16 @@ LEFT JOIN bean_chatters ch ON b.url = ch.url
 -- LEFT JOIN bean_regions r ON b.url = r.url
 -- LEFT JOIN bean_entities n ON b.url = n.url
 LEFT JOIN (
-	SELECT url, LIST(category) as categories FROM bean_categories GROUP BY url
+	SELECT url, LIST(DISTINCT category) as categories FROM bean_categories GROUP BY url
 ) as c ON b.url = c.url
 LEFT JOIN (
-	SELECT url, LIST(sentiment) as sentiments FROM bean_sentiments GROUP BY url
+	SELECT url, LIST(DISTINCT sentiment) as sentiments FROM bean_sentiments GROUP BY url
 ) as s ON b.url = s.url
 LEFT JOIN (
-	SELECT url, LIST(region) as regions FROM bean_regions GROUP BY url
+	SELECT url, LIST(DISTINCT region) as regions FROM bean_regions GROUP BY url
 ) as r ON b.url = r.url
 LEFT JOIN (
-	SELECT url, LIST(entity) as entities FROM bean_entities GROUP BY url
+	SELECT url, LIST(DISTINCT entity) as entities FROM bean_entities GROUP BY url
 ) as n ON b.url = n.url
+ORDER BY b.created DESC;
 ;

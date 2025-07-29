@@ -44,30 +44,31 @@ type TagData struct {
 // }
 
 type Bean struct {
-	URL           string       `db:"url"`
-	Kind          string       `db:"kind"`
-	Title         string       `db:"title"`
-	TitleLength   int          `db:"title_length" bson:"num_words_in_title"`
-	Summary       string       `db:"summary"`
-	SummaryLength int          `db:"summary_length" bson:"num_words_in_summary"`
-	Content       string       `db:"content"`
-	ContentLength int          `db:"content_length" bson:"num_words_in_content"`
-	Author        string       `db:"author"`
-	Source        string       `db:"source"`
-	Created       time.Time    `db:"created" bson:"created"`
-	Collected     time.Time    `db:"collected" bson:"collected"`
-	Embedding     Float32Array `db:"embedding"`
-	Categories    StringArray  `db:"categories"`
-	Sentiments    StringArray  `db:"sentiments"`
-	Related       StringArray  `db:"related"`
-	Gist          string       `db:"gist"`
-	Regions       StringArray  `db:"regions"`
-	Entities      StringArray  `db:"entities"`
-	Updated       time.Time    `db:"updated"` // last time some chatter was collected
-	Likes         int          `db:"likes"`
-	Comments      int          `db:"comments"`
-	Subscribers   int          `db:"subscribers"`
-	Shares        int          `db:"shares"`
+	URL            string       `db:"url"`
+	Kind           string       `db:"kind"`
+	Title          string       `db:"title"`
+	TitleLength    int          `db:"title_length" bson:"num_words_in_title"`
+	Summary        string       `db:"summary"`
+	SummaryLength  int          `db:"summary_length" bson:"num_words_in_summary"`
+	Content        string       `db:"content"`
+	ContentLength  int          `db:"content_length" bson:"num_words_in_content"`
+	Author         string       `db:"author"`
+	Source         string       `db:"source"`
+	Created        time.Time    `db:"created" bson:"created"`
+	Collected      time.Time    `db:"collected" bson:"collected"`
+	Embedding      Float32Array `db:"embedding" bson:"_"`
+	MongoEmbedding []float64    `db:"_" bson:"embedding"`
+	Categories     StringArray  `db:"categories"`
+	Sentiments     StringArray  `db:"sentiments"`
+	Related        StringArray  `db:"related"`
+	Gist           string       `db:"gist"`
+	Regions        StringArray  `db:"regions"`
+	Entities       StringArray  `db:"entities"`
+	Updated        time.Time    `db:"updated"` // last time some chatter was collected
+	Likes          int          `db:"likes"`
+	Comments       int          `db:"comments"`
+	Subscribers    int          `db:"subscribers"`
+	Shares         int          `db:"shares"`
 }
 
 type GeneratedBean struct {
@@ -153,24 +154,41 @@ func (vec *Float32Array) Scan(value interface{}) error {
 	case []interface{}:
 		converted := make([]float32, len(value))
 		for i, val := range value {
-			converted[i] = val.(float32)
+			switch v := val.(type) {
+			case float64:
+				converted[i] = float32(v)
+			case float32:
+				converted[i] = v
+			case int:
+				converted[i] = float32(v)
+			default:
+				return fmt.Errorf("unsupported array element type: %T", val)
+			}
 		}
 		*vec = converted
+		return nil
 	case []float32:
 		*vec = value
 		return nil
 	case []float64:
+		converted := make([]float32, len(value))
+		for i, v := range value {
+			converted[i] = float32(v)
+		}
+		*vec = converted
+		return nil
 	case []int:
 		converted := make([]float32, len(value))
 		for i, val := range value {
 			converted[i] = float32(val)
 		}
 		*vec = converted
+		return nil
 	case []byte:
+		return json.Unmarshal(value, vec)
 	case string:
 		return json.Unmarshal([]byte(value), vec)
 	default:
 		return fmt.Errorf("unsupported type: %T", value)
 	}
-	return nil
 }
