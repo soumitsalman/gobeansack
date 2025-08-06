@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS bean_cores (
     title_length INTEGER DEFAULT 0,
     content TEXT,
     content_length INTEGER DEFAULT 0,
+    restricted_content BOOLEAN DEFAULT FALSE,
     summary TEXT,
     summary_length INTEGER DEFAULT 0,
     author VARCHAR,
@@ -34,24 +35,23 @@ CREATE TABLE IF NOT EXISTS bean_embeddings (
 );
 CREATE TABLE IF NOT EXISTS bean_gists (
     url VARCHAR NOT NULL PRIMARY KEY,
-    gist TEXT NOT NULL
+    gist TEXT NOT NULL CHECK (gist <> '')
 );
-
 CREATE TABLE IF NOT EXISTS bean_categories (
     url VARCHAR NOT NULL,
-    category VARCHAR NOT NULL
+    category VARCHAR NOT NULL CHECK (category <> '')
 );
 CREATE TABLE IF NOT EXISTS bean_sentiments (
     url VARCHAR NOT NULL,
-    sentiment VARCHAR NOT NULL
+    sentiment VARCHAR NOT NULL CHECK (sentiment <> '')
 );
 CREATE TABLE IF NOT EXISTS bean_regions (
     url VARCHAR NOT NULL,
-    region VARCHAR NOT NULL
+    region VARCHAR NOT NULL CHECK (region <> '')
 );
 CREATE TABLE IF NOT EXISTS bean_entities (
     url VARCHAR NOT NULL,
-    entity VARCHAR NOT NULL
+    entity VARCHAR NOT NULL CHECK (entity <> '')
 );
 
 CREATE TABLE IF NOT EXISTS chatters (

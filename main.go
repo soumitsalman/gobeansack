@@ -16,6 +16,7 @@ const (
 func main() {
 	// Load configuration from environment variables
 	noerror(godotenv.Load(".env"), "LOAD ENV ERROR")
+	// Read the configuration parameters
 	dbpath, ok := os.LookupEnv("DB_PATH")
 	if !ok {
 		dbpath = DEFAULT_DB_PATH
@@ -29,19 +30,17 @@ func main() {
 	if err != nil {
 		cluster_eps = DEFAULT_CLUSTER_EPS
 	}
-
-	// initialize database if needed
-	init, err := os.ReadFile("./factory/init.sql")
-	noerror(err, "READ SQL ERROR")
-	initsql := string(init)
-
-	ds := NewBeansack(dbpath, initsql, dim, cluster_eps)
-	defer ds.Close()
-
-	// Start HTTP server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-	noerror(StartServer(ds, port), "SERVER ERROR")
+
+	// initialize database
+	init, err := os.ReadFile("./factory/init.sql")
+	noerror(err, "READ SQL ERROR")
+	ds := NewBeansack(dbpath, string(init), dim, cluster_eps)
+	defer ds.Close()
+
+	r := setupRoutes(ds)
+	noerror(r.Run(":"+port), "SERVER ERROR")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"log"
 	"runtime"
@@ -12,9 +13,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/marcboeker/go-duckdb/v2"
-
-	// _ "github.com/mattn/go-sqlite3"
 	datautils "github.com/soumitsalman/data-utils"
+	// _ "github.com/mattn/go-sqlite3"
 )
 
 const (
@@ -155,7 +155,7 @@ func prepareBeans(beans []Bean) []Bean {
 func (ds *Ducksack) StoreBeans(beans []Bean) int {
 	beans = prepareBeans(beans)
 	return appendToTable(ds, BEAN_CORES, beans, func(bean Bean) []driver.Value {
-		return []driver.Value{bean.URL, bean.Kind, bean.Title, bean.TitleLength, bean.Content, bean.ContentLength, bean.Summary, bean.SummaryLength, bean.Author, bean.Source, bean.Created, bean.Collected}
+		return []driver.Value{bean.URL, bean.Kind, bean.Title, bean.TitleLength, bean.Content, bean.ContentLength, bean.RestrictedContent, bean.Summary, bean.SummaryLength, bean.Author, bean.Source, bean.Created, bean.Collected}
 	})
 }
 
@@ -165,46 +165,69 @@ func (ds *Ducksack) StoreEmbeddings(beans []Bean) int {
 	})
 }
 
-func (ds *Ducksack) RectifyExtendedFields(beans []Bean, max_computed_tags int, max_cluster_eps float32) {
-	urls := datautils.Transform(beans, func(b *Bean) string {
-		return b.URL
+func flattenTags(url string, data []string) []TagData {
+	return datautils.FilterAndTransform[string, TagData](data, func(tag *string) (bool, TagData) {
+		return len(*tag) > 0, TagData{URL: url, Tag: *tag}
 	})
-
-	// const _SQL_INSERT_CATEGORIES = `
-	// INSERT INTO bean_categories (url, category)
-	// SELECT m1.url, m1.category FROM category_mappings m1
-	// WHERE
-	// 	m1.url IN (?) AND
-	// 	m1.category IN (
-	// 		SELECT category FROM category_mappings m2
-	// 		WHERE m1.url == m2.url
-	// 		ORDER BY m2.distance LIMIT %d
-	// 	);`
-	// updateItems(ds, fmt.Sprintf(_SQL_INSERT_CATEGORIES, max_computed_tags), urls)
-
-	// const _SQL_INSERT_SENTIMENTS = `
-	// INSERT INTO bean_sentiments (url, sentiment)
-	// SELECT m1.url, m1.sentiment FROM sentiment_mappings m1
-	// WHERE
-	// 	m1.url IN (?) AND
-	// 	m1.sentiment IN (
-	// 		SELECT sentiment FROM sentiment_mappings m2
-	// 		WHERE m1.url == m2.url
-	// 		ORDER BY m2.distance LIMIT %d
-	// 	);`
-	// updateItems(ds, fmt.Sprintf(_SQL_INSERT_SENTIMENTS, max_computed_tags), urls)
-
-	const _SQL_INSERT_CLUSTERS = `
-	INSERT INTO bean_clusters (url, related)
-	SELECT url, related FROM cluster_mappings
-	WHERE url IN (?) AND distance < %f;`
-	updateItems(ds, fmt.Sprintf(_SQL_INSERT_CLUSTERS, max_cluster_eps), urls)
 }
 
-func (ds *Ducksack) StoreTags(tags []TagData, tag_table string) int {
+func prepareTags(beans []Bean) map[string][]TagData {
+	// rough initialization
+	results := map[string][]TagData{
+		BEAN_CATEGORIES: make([]TagData, 0, 3*len(beans)),
+		BEAN_SENTIMENTS: make([]TagData, 0, 3*len(beans)),
+		BEAN_REGIONS:    make([]TagData, 0, 3*len(beans)),
+		BEAN_ENTITIES:   make([]TagData, 0, 3*len(beans)),
+		BEAN_GISTS:      make([]TagData, 0, len(beans)),
+	}
+	for _, bean := range beans {
+		if len(bean.Categories) > 0 {
+			results[BEAN_CATEGORIES] = append(results[BEAN_CATEGORIES], flattenTags(bean.URL, bean.Categories)...)
+		}
+		if len(bean.Sentiments) > 0 {
+			results[BEAN_SENTIMENTS] = append(results[BEAN_SENTIMENTS], flattenTags(bean.URL, bean.Sentiments)...)
+		}
+		if len(bean.Regions) > 0 {
+			results[BEAN_REGIONS] = append(results[BEAN_REGIONS], flattenTags(bean.URL, bean.Regions)...)
+		}
+		if len(bean.Entities) > 0 {
+			results[BEAN_ENTITIES] = append(results[BEAN_ENTITIES], flattenTags(bean.URL, bean.Entities)...)
+		}
+		if len(bean.Gist) > 0 {
+			results[BEAN_GISTS] = append(results[BEAN_GISTS], TagData{URL: bean.URL, Tag: bean.Gist})
+		}
+	}
+	return results
+}
+
+func (ds *Ducksack) storeTagsToTable(tags []TagData, tag_table string) int {
+	if len(tags) == 0 {
+		return 0
+	}
 	return appendToTable(ds, tag_table, tags, func(tag TagData) []driver.Value {
 		return []driver.Value{tag.URL, tag.Tag}
 	})
+}
+
+func (ds *Ducksack) StoreTags(beans []Bean) int {
+	tags := prepareTags(beans)
+	count := 0
+	if categories, ok := tags[BEAN_CATEGORIES]; ok {
+		count += ds.storeTagsToTable(categories, BEAN_CATEGORIES)
+	}
+	if sentiments, ok := tags[BEAN_SENTIMENTS]; ok {
+		count += ds.storeTagsToTable(sentiments, BEAN_SENTIMENTS)
+	}
+	if regions, ok := tags[BEAN_REGIONS]; ok {
+		count += ds.storeTagsToTable(regions, BEAN_REGIONS)
+	}
+	if entities, ok := tags[BEAN_ENTITIES]; ok {
+		count += ds.storeTagsToTable(entities, BEAN_ENTITIES)
+	}
+	if gist, ok := tags[BEAN_GISTS]; ok {
+		count += ds.storeTagsToTable(gist, BEAN_GISTS)
+	}
+	return count
 }
 
 func prepareChatters(chatters []Chatter) []Chatter {
@@ -251,11 +274,11 @@ func queryItems[T any](ds *Ducksack, sql string, urls []string) []T {
 	return data
 }
 
-func updateItems(ds *Ducksack, expr string, urls []string) {
-	query, args := mustIn(expr, urls)
-	_, err := ds.db.Exec(query, args...)
-	noerror(err, "UPDATE ERROR")
-}
+// func updateItems(ds *Ducksack, expr string, urls []string) {
+// 	query, args := mustIn(expr, urls)
+// 	_, err := ds.db.Exec(query, args...)
+// 	noerror(err, "UPDATE ERROR")
+// }
 
 ////////// DIRECT QUERY/GET FUNCTIONS //////////
 
@@ -324,6 +347,13 @@ func (ds *Ducksack) GetBeanChatters(urls []string) []ChatterAggregate {
 	return mustSelect[ChatterAggregate](ds, query, args...)
 }
 
+func (ds *Ducksack) GetSources(domain_names []string) []Source {
+	const _SQL_QUERY_SOURCES = `
+	SELECT * FROM sources
+	WHERE domain_name IN (?);`
+	return mustSelect[Source](ds, _SQL_QUERY_SOURCES, domain_names)
+}
+
 ////////// DISTINCT ITEMS //////////
 
 func (ds *Ducksack) DistinctRegions() []string {
@@ -347,13 +377,16 @@ func (ds *Ducksack) DistinctSentiments() []string {
 }
 
 func (ds *Ducksack) DistinctSources() []string {
-	const _SQL_GET_ALL_SOURCES = `SELECT base_url AS value FROM sources;`
+	const _SQL_GET_ALL_SOURCES = `SELECT DISTINCT source FROM bean_cores;`
 	return mustSelect[string](ds, _SQL_GET_ALL_SOURCES)
 }
 
-//////////// COMPOSITE QUERIES ///////////
-
-const _SQL_QUERY_BEAN_AGGREGATES = `SELECT * FROM bean_aggregates`
+// ////////// COMPOSITE QUERIES ///////////
+const _SQL_QUERY_BEANS = `
+SELECT %s FROM bean_aggregates
+%s
+%s
+%s;`
 
 func (ds *Ducksack) QueryBeans(
 	kind string,
@@ -362,10 +395,18 @@ func (ds *Ducksack) QueryBeans(
 	regions []string,
 	entities []string,
 	sources []string,
-	offset int64, limit int64) []Bean {
-	sql, where_params := addWhere(_SQL_QUERY_BEAN_AGGREGATES, kind, created_after, categories, regions, entities, sources, 0)
-	sql, paging_params := addPagination(sql, offset, limit)
-	return mustSelect[Bean](ds, sql, append(where_params, paging_params...)...)
+	order_by []string,
+	offset int64, limit int64,
+	select_fields []string) []Bean {
+
+	select_fields_sql := createSelectFields(select_fields...)
+	where_sql, where_params := createWhere(kind, created_after, categories, regions, entities, sources, 0)
+	order_by_sql := createOrderBy(order_by...)
+	paging_sql, paging_params := createPagination(offset, limit)
+
+	sql := fmt.Sprintf(_SQL_QUERY_BEANS, select_fields_sql, where_sql, order_by_sql, paging_sql)
+	sql, params := mustIn(sql, append(where_params, paging_params...)...)
+	return mustSelect[Bean](ds, sql, params...)
 }
 
 func (ds *Ducksack) VectorSearchBeans(
@@ -376,35 +417,41 @@ func (ds *Ducksack) VectorSearchBeans(
 	regions []string,
 	entities []string,
 	sources []string,
-	offset int64, limit int64) []Bean {
+	order_by []string,
+	offset int64, limit int64,
+	select_fields []string) []Bean {
 
-	filtered_sql, params := addWhere(_SQL_QUERY_BEAN_AGGREGATES, kind, created_after, categories, regions, entities, sources, 0)
-	distances_sql := `
-	SELECT *, array_cosine_distance(embedding, ?::FLOAT[%d]) AS distance 
-	FROM filtered`
-	distances_sql, distances_where_params := addWhere(fmt.Sprintf(distances_sql, ds.dim), "", time.Time{}, nil, nil, nil, nil, max_distance)
-	distances_sql = addOrderBy(distances_sql, "distance DESC")
-	distances_sql, distances_pagination_params := addPagination(distances_sql, offset, limit)
+	select_fields_sql := createSelectFields(select_fields...)
+	select_fields_sql = fmt.Sprintf("%s, array_cosine_distance(embedding, ?::FLOAT[%d]) AS distance", select_fields_sql, ds.dim)
+	where_sql, where_params := createWhere(kind, created_after, categories, regions, entities, sources, max_distance)
+	order_by_sql := createOrderBy(order_by...)
+	paging_sql, paging_params := createPagination(offset, limit)
 
-	params = append(params, Float32Array(embedding))
-	params = append(params, distances_where_params...)
-	params = append(params, distances_pagination_params...)
-
-	sql := `
-	WITH filtered AS ( %s ), distances AS ( %s )
-	SELECT * EXCLUDE(distance) FROM distances;`
-	return mustSelect[Bean](ds, fmt.Sprintf(sql, filtered_sql, distances_sql), params...)
+	sql := fmt.Sprintf(_SQL_QUERY_BEANS, select_fields_sql, where_sql, order_by_sql, paging_sql)
+	params := []any{Float32Array(embedding)}
+	params = append(params, where_params...)
+	params = append(params, paging_params...)
+	sql, params = mustIn(sql, params...)
+	return mustSelect[Bean](ds, sql, params...)
 }
 
-func addWhere(
-	base_sql string,
+func createSelectFields(field_exprs ...string) string {
+	if len(field_exprs) > 0 {
+		return strings.Join(field_exprs, ", ")
+	}
+	return "*"
+}
+
+func createWhere(
 	kind string,
 	created_after time.Time,
 	categories []string,
 	regions []string,
 	entities []string,
 	sources []string,
-	max_distance float64) (string, []any) {
+	max_distance float64,
+	additional_exprs ...string) (string, []any) {
+
 	params := []any{}
 	where_exprs := []string{}
 
@@ -436,28 +483,46 @@ func addWhere(
 		where_exprs = append(where_exprs, "distance <= ?")
 		params = append(params, max_distance)
 	}
+	if len(additional_exprs) > 0 {
+		where_exprs = append(where_exprs, additional_exprs...)
+	}
 
 	if len(where_exprs) > 0 {
-		base_sql = fmt.Sprintf("%s WHERE %s", base_sql, strings.Join(where_exprs, " AND "))
+		return fmt.Sprintf("WHERE %s", strings.Join(where_exprs, " AND ")), params
 	}
-	return mustIn(base_sql, params...)
+	return "", params
 }
 
-func addPagination(base_sql string, offset int64, limit int64) (string, []any) {
+func createPagination(offset int64, limit int64) (string, []any) {
+	exprs := []string{}
 	params := []any{}
 	if offset > 0 {
-		base_sql = fmt.Sprintf("%s OFFSET ?", base_sql)
+		exprs = append(exprs, "OFFSET ?")
 		params = append(params, offset)
 	}
 	if limit > 0 {
-		base_sql = fmt.Sprintf("%s LIMIT ?", base_sql)
+		exprs = append(exprs, "LIMIT ?")
 		params = append(params, limit)
 	}
-	return base_sql, params
+	return strings.Join(exprs, " "), params
 }
 
-func addOrderBy(base_sql string, fields ...string) string {
-	return fmt.Sprintf("%s ORDER BY %s", base_sql, strings.Join(fields, ", "))
+func createOrderBy(fields ...string) string {
+	if len(fields) > 0 {
+		return fmt.Sprintf("ORDER BY %s", strings.Join(fields, ", "))
+	}
+	return ""
+}
+
+////////// ADMIN COMMANDS ///////////
+
+func (ds *Ducksack) Execute(commands ...string) error {
+	errs := []error{}
+	for _, command := range commands {
+		_, err := ds.db.Exec(command)
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 func (ds *Ducksack) Close() {

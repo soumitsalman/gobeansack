@@ -108,7 +108,7 @@ func TestVectorSearch(t *testing.T) {
 	sources := []string{"techstartups", "techradar"}
 
 	datautils.PrintTable(
-		ds.VectorSearchBeans(query_emb, 0.25, NEWS, time.Time{}, nil, nil, nil, sources, 0, 5),
+		ds.VectorSearchBeans(query_emb, 0.25, NEWS, time.Time{}, nil, nil, nil, sources, nil, 0, 5, nil),
 		[]string{"kind", "title", "categories", "entities", "created", "source"},
 		func(b *Bean) []string {
 			return []string{b.Kind, b.Title, strings.Join(b.Categories, ", "), strings.Join(b.Entities, ", "), b.Created.Format(time.RFC3339), b.Source}
@@ -123,7 +123,7 @@ func TestQueryBeans(t *testing.T) {
 
 	for i := int64(0); i < 3; i++ {
 		datautils.PrintTable(
-			ds.QueryBeans(NEWS, time.Now().AddDate(0, 0, -3), categories, nil, entities, nil, i*5, 6),
+			ds.QueryBeans(NEWS, time.Now().AddDate(0, 0, -3), categories, nil, entities, nil, nil, i*5, 6, nil),
 			[]string{"kind", "title", "categories", "entities", "created", "source"},
 			func(b *Bean) []string {
 				return []string{b.Kind, b.Title, strings.Join(b.Categories, ", "), strings.Join(b.Entities, ", "), b.Created.Format(time.RFC3339), b.Source}
@@ -201,28 +201,12 @@ func TestHydrateDB(t *testing.T) {
 	for i := int64(0); i < 25; i++ {
 		beans := getTestBeans(i*importnum, importnum)
 		ds.StoreBeans(beans)
+		ds.StoreTags(beans)
 		embs := datautils.Filter(beans, func(b *Bean) bool {
 			return len(b.Embedding) > 0
 		})
 		ds.StoreEmbeddings(embs)
 
-		tags := prepareTags(beans)
-
-		if categories, ok := tags["categories"]; ok && len(categories) > 0 {
-			ds.StoreTags(categories, BEAN_CATEGORIES)
-		}
-		if sentiments, ok := tags["sentiments"]; ok && len(sentiments) > 0 {
-			ds.StoreTags(sentiments, BEAN_SENTIMENTS)
-		}
-		if regions, ok := tags["regions"]; ok && len(regions) > 0 {
-			ds.StoreTags(regions, BEAN_REGIONS)
-		}
-		if entities, ok := tags["entities"]; ok && len(entities) > 0 {
-			ds.StoreTags(entities, BEAN_ENTITIES)
-		}
-		if gist, ok := tags["gist"]; ok && len(gist) > 0 {
-			ds.StoreTags(gist, BEAN_GISTS)
-		}
 	}
 }
 
@@ -332,31 +316,4 @@ func getTestDigests(skip int64, limit int64) []TestDigest {
 			"sentiments": 1,
 		},
 	)
-}
-
-func flattenTags(url string, data []string) []TagData {
-	var tags []TagData = make([]TagData, 0, len(data))
-	for _, tag := range data {
-		tags = append(tags, TagData{URL: url, Tag: tag})
-	}
-	return tags
-}
-
-func prepareTags(beans []Bean) map[string][]TagData {
-	// rough initialization
-	results := map[string][]TagData{
-		"categories": make([]TagData, 0, 3*len(beans)),
-		"sentiments": make([]TagData, 0, 3*len(beans)),
-		"regions":    make([]TagData, 0, 3*len(beans)),
-		"entities":   make([]TagData, 0, 3*len(beans)),
-		"gist":       make([]TagData, 0, len(beans)),
-	}
-	for _, bean := range beans {
-		results["categories"] = append(results["categories"], flattenTags(bean.URL, bean.Categories)...)
-		results["sentiments"] = append(results["sentiments"], flattenTags(bean.URL, bean.Sentiments)...)
-		results["regions"] = append(results["regions"], flattenTags(bean.URL, bean.Regions)...)
-		results["entities"] = append(results["entities"], flattenTags(bean.URL, bean.Entities)...)
-		results["gist"] = append(results["gist"], TagData{URL: bean.URL, Tag: bean.Gist})
-	}
-	return results
 }
