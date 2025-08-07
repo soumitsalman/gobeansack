@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
@@ -21,7 +20,7 @@ var ORDER_BY_CREATED = []string{"created DESC"}
 var ORDER_BY_DISTANCE = []string{"distance ASC"}
 var ORDER_BY_CHATTERS = []string{"updated DESC", "comments DESC", "likes DESC", "shares DESC"}
 
-type BeanSearchRequest struct {
+type BeansQueryRequest struct {
 	// these are query params
 	Kind       string    `form:"kind"`
 	Since      time.Time `form:"created_since" time_format:"2006-01-02T15:04:05Z07:00"`
@@ -33,24 +32,54 @@ type BeanSearchRequest struct {
 	Limit      int64     `form:"limit" binding:"min=0,max=200" default:"50"`
 	// these are body params
 	Embedding   Float32Array `json:"embedding,omitempty"`
-	MaxDistance float64      `json:"max_distance,omitempty" binding:"min=0,max=1" default:"0.5"`
+	MaxDistance float64      `json:"max_distance,omitempty" binding:"min=0,max=1"`
 	URLs        []string     `json:"urls,omitempty"`
 }
 
-func createBeansSearchHandler(ds *Ducksack) gin.HandlerFunc {
+func validateBeansQueryRequest(c *gin.Context) {
+	var req BeansQueryRequest
+	err := c.ShouldBindQuery(&req)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	err = c.ShouldBindJSON(&req)
+	// not having a body is not an error, malformed json is
+	if err != nil && err.Error() != "EOF" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.Embedding) > 0 && req.Limit == 0 && req.MaxDistance == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "For vector search, you must provide either a limit or a max_distance"})
+		return
+	}
+	// adjust the default
+	if req.Limit == 0 {
+		req.Limit = DEFAULT_LIMIT
+	}
+	c.Set("req", req)
+	c.Next()
+}
+
+func createLatestBeansHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		req := c.MustGet("req").(BeanSearchRequest)
+		req := c.MustGet("req").(BeansQueryRequest)
 		order_by := ORDER_BY_CREATED
 		if len(req.Embedding) > 0 {
 			order_by = ORDER_BY_DISTANCE
 		}
-		c.JSON(http.StatusOK, findBeans(ds, req, order_by, SELECT_PUBLIC_FIELDS))
+		beans, err := findBeans(ds, req, order_by, SELECT_PUBLIC_FIELDS)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, beans)
 	}
 }
 
 func createRelatedBeansHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		req := c.MustGet("req").(BeanSearchRequest)
+		req := c.MustGet("req").(BeansQueryRequest)
 		if len(req.URLs) == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "urls is required"})
 			return
@@ -61,7 +90,7 @@ func createRelatedBeansHandler(ds *Ducksack) gin.HandlerFunc {
 
 func createRegionsHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		req := c.MustGet("req").(BeanSearchRequest)
+		req := c.MustGet("req").(BeansQueryRequest)
 		if len(req.URLs) > 0 {
 			c.JSON(http.StatusOK, ds.GetRegions(req.URLs))
 		} else {
@@ -72,7 +101,7 @@ func createRegionsHandler(ds *Ducksack) gin.HandlerFunc {
 
 func createEntitiesHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		req := c.MustGet("req").(BeanSearchRequest)
+		req := c.MustGet("req").(BeansQueryRequest)
 		if len(req.URLs) > 0 {
 			c.JSON(http.StatusOK, ds.GetEntities(req.URLs))
 		} else {
@@ -83,7 +112,7 @@ func createEntitiesHandler(ds *Ducksack) gin.HandlerFunc {
 
 func createCategoriesHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		req := c.MustGet("req").(BeanSearchRequest)
+		req := c.MustGet("req").(BeansQueryRequest)
 		if len(req.URLs) > 0 {
 			c.JSON(http.StatusOK, ds.GetCategories(req.URLs))
 		} else {
@@ -94,7 +123,7 @@ func createCategoriesHandler(ds *Ducksack) gin.HandlerFunc {
 
 func createSourcesHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		req := c.MustGet("req").(BeanSearchRequest)
+		req := c.MustGet("req").(BeansQueryRequest)
 		if len(req.Domains) > 0 {
 			c.JSON(http.StatusOK, ds.GetSources(req.Domains))
 		} else {
@@ -105,44 +134,61 @@ func createSourcesHandler(ds *Ducksack) gin.HandlerFunc {
 
 func createExistsHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		req := c.MustGet("req").(BeanSearchRequest)
+		req := c.MustGet("req").(BeansQueryRequest)
 		c.JSON(http.StatusOK, ds.Exists(req.URLs))
 	}
 }
 
+////////// SORT BY TRENDING AND GET ALL FIELDS //////////
+
+func validateVectorSearchRequest(c *gin.Context) {
+	req := c.MustGet("req").(BeansQueryRequest)
+	if len(req.Embedding) > 0 && req.MaxDistance == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "For vector search, you must provide a max_distance"})
+		return
+	}
+	c.Next()
+}
+
 func createTrendingBeansHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		req := c.MustGet("req").(BeanSearchRequest)
-		if len(req.Embedding) > 0 && req.MaxDistance == 0 {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "For vector search, you must provide a max_distance"})
+		req := c.MustGet("req").(BeansQueryRequest)
+		beans, err := findBeans(ds, req, ORDER_BY_CHATTERS, nil)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, findBeans(ds, req, ORDER_BY_CHATTERS, nil))
+		c.JSON(http.StatusOK, beans)
 	}
 }
 
 func createTrendingBeanGistsHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		req := c.MustGet("req").(BeanSearchRequest)
-		if len(req.Embedding) > 0 && req.MaxDistance == 0 {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "For vector search, you must provide a max_distance"})
+		req := c.MustGet("req").(BeansQueryRequest)
+		beans, err := findBeans(ds, req, ORDER_BY_CHATTERS, SELECT_GISTS)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, findBeans(ds, req, ORDER_BY_CHATTERS, SELECT_GISTS))
+		c.JSON(http.StatusOK, beans)
 	}
 }
 
 func createTrendingBeanEmbeddingsHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		req := c.MustGet("req").(BeanSearchRequest)
-		c.JSON(http.StatusOK, findBeans(ds, req, ORDER_BY_CHATTERS, SELECT_EMBEDDINGS))
+		req := c.MustGet("req").(BeansQueryRequest)
+		beans, err := findBeans(ds, req, ORDER_BY_CHATTERS, SELECT_EMBEDDINGS)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, beans)
 	}
 }
 
-func findBeans(ds *Ducksack, req BeanSearchRequest, order_by []string, fields []string) []Bean {
-	var beans []Bean
+func findBeans(ds *Ducksack, req BeansQueryRequest, order_by []string, fields []string) ([]Bean, error) {
 	if len(req.Embedding) > 0 {
-		beans = ds.VectorSearchBeans(
+		return ds.VectorSearchBeanAggregates(
 			req.Embedding,
 			req.MaxDistance,
 			req.Kind,
@@ -157,7 +203,7 @@ func findBeans(ds *Ducksack, req BeanSearchRequest, order_by []string, fields []
 			fields,
 		)
 	} else {
-		beans = ds.QueryBeans(
+		return ds.QueryBeanAggregates(
 			req.Kind,
 			req.Since,
 			req.Categories,
@@ -170,6 +216,4 @@ func findBeans(ds *Ducksack, req BeanSearchRequest, order_by []string, fields []
 			fields,
 		)
 	}
-	fmt.Println("beans", len(beans))
-	return beans
 }

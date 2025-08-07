@@ -15,7 +15,7 @@ const (
 
 func main() {
 	// Load configuration from environment variables
-	noerror(godotenv.Load(".env"), "LOAD ENV ERROR")
+	godotenv.Load(".env")
 	// Read the configuration parameters
 	dbpath, ok := os.LookupEnv("DB_PATH")
 	if !ok {

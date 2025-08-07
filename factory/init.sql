@@ -31,27 +31,33 @@ CREATE TABLE IF NOT EXISTS generated_beans (
 );
 CREATE TABLE IF NOT EXISTS bean_embeddings (
     url VARCHAR NOT NULL PRIMARY KEY,
-    embedding FLOAT[%d] NOT NULL
+    embedding FLOAT[%d] NOT NULL,
+    FOREIGN KEY (url) REFERENCES bean_cores(url)
 );
 CREATE TABLE IF NOT EXISTS bean_gists (
     url VARCHAR NOT NULL PRIMARY KEY,
-    gist TEXT NOT NULL CHECK (gist <> '')
+    gist TEXT NOT NULL CHECK (gist <> ''),
+    FOREIGN KEY (url) REFERENCES bean_cores(url)
 );
 CREATE TABLE IF NOT EXISTS bean_categories (
     url VARCHAR NOT NULL,
-    category VARCHAR NOT NULL CHECK (category <> '')
+    category VARCHAR NOT NULL CHECK (category <> ''),
+    FOREIGN KEY (url) REFERENCES bean_cores(url)
 );
 CREATE TABLE IF NOT EXISTS bean_sentiments (
     url VARCHAR NOT NULL,
-    sentiment VARCHAR NOT NULL CHECK (sentiment <> '')
+    sentiment VARCHAR NOT NULL CHECK (sentiment <> ''),
+    FOREIGN KEY (url) REFERENCES bean_cores(url)
 );
 CREATE TABLE IF NOT EXISTS bean_regions (
     url VARCHAR NOT NULL,
-    region VARCHAR NOT NULL CHECK (region <> '')
+    region VARCHAR NOT NULL CHECK (region <> ''),
+    FOREIGN KEY (url) REFERENCES bean_cores(url)
 );
 CREATE TABLE IF NOT EXISTS bean_entities (
     url VARCHAR NOT NULL,
-    entity VARCHAR NOT NULL CHECK (entity <> '')
+    entity VARCHAR NOT NULL CHECK (entity <> ''),
+    FOREIGN KEY (url) REFERENCES bean_cores(url)
 );
 
 CREATE TABLE IF NOT EXISTS chatters (
@@ -115,32 +121,6 @@ CREATE TABLE IF NOT EXISTS sources (
     rss_feed VARCHAR
 );
 
--- CREATE TABLE IF NOT EXISTS categories AS
--- SELECT 
---     _id as category,
---     embedding::FLOAT[] as embedding
--- FROM read_parquet('factory/categories.parquet');
-
--- CREATE VIEW IF NOT EXISTS category_mappings AS
--- SELECT 
---     url,
---     category, 
---     array_cosine_distance(b.embedding, c.embedding) as distance
--- FROM bean_embeddings b CROSS JOIN categories c;
-
--- CREATE TABLE IF NOT EXISTS sentiments AS
--- SELECT 
---     _id as sentiment,
---     embedding::FLOAT[] as embedding
--- FROM read_parquet('factory/sentiments.parquet');
-
--- CREATE VIEW IF NOT EXISTS sentiment_mappings AS
--- SELECT 
---     url,
---     sentiment, 
---     array_cosine_distance(b.embedding, s.embedding) as distance
--- FROM bean_embeddings b CROSS JOIN sentiments s;
-
 CREATE VIEW IF NOT EXISTS bean_clusters AS 
 SELECT 
     be1.url as url, 
@@ -155,7 +135,7 @@ CREATE VIEW IF NOT EXISTS bean_aggregates AS
 SELECT
     b.url, b.kind, b.title, b.title_length, b.summary, b.summary_length, b.author, b.source, b.created, b.collected,
     e.embedding,
-    g.gist,    
+    COALESCE(g.gist, '') as gist,    
     COALESCE(ch.collected, b.created) as updated,
     COALESCE(ch.likes, 0) as likes,
     COALESCE(ch.comments, 0) as comments,
@@ -169,10 +149,6 @@ FROM bean_cores b
 LEFT JOIN bean_embeddings e ON b.url = e.url
 LEFT JOIN bean_gists g ON b.url = g.url
 LEFT JOIN bean_chatters ch ON b.url = ch.url
--- LEFT JOIN bean_categories c ON b.url = c.url
--- LEFT JOIN bean_sentiments s ON b.url = s.url
--- LEFT JOIN bean_regions r ON b.url = r.url
--- LEFT JOIN bean_entities n ON b.url = n.url
 LEFT JOIN (
 	SELECT url, LIST(DISTINCT category) as categories FROM bean_categories GROUP BY url
 ) as c ON b.url = c.url

@@ -1,0 +1,37 @@
+# Use golang bullseye as base image (Debian-based)
+FROM golang:1.24-bookworm
+
+# Install necessary dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    build-essential \
+    sqlite3 \
+    libsqlite3-dev \
+    libstdc++-12-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Set CGO flags
+ENV CGO_ENABLED=1
+ENV CGO_CFLAGS="-I/usr/include"
+ENV CGO_CXXFLAGS="-I/usr/include"
+ENV CGO_LDFLAGS="-L/usr/lib -L/usr/lib/x86_64-linux-gnu -lstdc++"
+
+COPY . .
+RUN go mod download
+RUN CGO_ENABLED=1 GOOS=linux go build -o gobeansack .
+
+# Create directory for SQLite database
+RUN mkdir -p /data
+
+ENV PORT=8080
+ENV DB_PATH=/data/beansack.db
+ENV GIN_MODE=release
+
+EXPOSE 8080
+
+# Run the application as entrypoint
+ENTRYPOINT ["/app/gobeansack"]

@@ -106,9 +106,10 @@ func TestVectorSearch(t *testing.T) {
 	}
 
 	sources := []string{"techstartups", "techradar"}
-
+	beans, err := ds.VectorSearchBeanAggregates(query_emb, 0.25, NEWS, time.Time{}, nil, nil, nil, sources, nil, 0, 5, nil)
+	noerror(err, "VECTOR SEARCH ERROR")
 	datautils.PrintTable(
-		ds.VectorSearchBeans(query_emb, 0.25, NEWS, time.Time{}, nil, nil, nil, sources, nil, 0, 5, nil),
+		beans,
 		[]string{"kind", "title", "categories", "entities", "created", "source"},
 		func(b *Bean) []string {
 			return []string{b.Kind, b.Title, strings.Join(b.Categories, ", "), strings.Join(b.Entities, ", "), b.Created.Format(time.RFC3339), b.Source}
@@ -121,9 +122,11 @@ func TestQueryBeans(t *testing.T) {
 	categories := []string{"Artificial Intelligence", "Cloud Computing"}
 	entities := []string{"ChatGPT", "Elon Musk"}
 
+	beans, err := ds.QueryBeanAggregates(NEWS, time.Now().AddDate(0, 0, -3), categories, nil, entities, nil, nil, 0, 5, nil)
+	noerror(err, "QUERY BEANS ERROR")
 	for i := int64(0); i < 3; i++ {
 		datautils.PrintTable(
-			ds.QueryBeans(NEWS, time.Now().AddDate(0, 0, -3), categories, nil, entities, nil, nil, i*5, 6, nil),
+			beans,
 			[]string{"kind", "title", "categories", "entities", "created", "source"},
 			func(b *Bean) []string {
 				return []string{b.Kind, b.Title, strings.Join(b.Categories, ", "), strings.Join(b.Entities, ", "), b.Created.Format(time.RFC3339), b.Source}
