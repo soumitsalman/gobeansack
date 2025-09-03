@@ -49,7 +49,7 @@ func setupRoutes(ds *Ducksack) *gin.Engine {
 	privileged := r.Group("/privileged/beans", createAuthVerificationHandler("PRIVILEGED_KEY"), validateQueryRequest)
 	{
 		privileged.GET("/exists", createExistsHandler(ds))
-		privileged.GET("/contents", createContentsHandler(ds))
+		privileged.GET("/latest/contents", createContentsHandler(ds))
 		privileged.GET("/trending", createTrendingBeansHandler(ds))
 		privileged.GET("/trending/digests", createTrendingDigestsHandler(ds))
 		privileged.GET("/trending/embeddings", createTrendingEmbeddingsHandler(ds))

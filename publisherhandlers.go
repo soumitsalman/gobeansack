@@ -14,8 +14,8 @@ func createStoreBeansHandler(ds *Ducksack) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		ds.StoreBeans(beans)
-		c.JSON(http.StatusOK, gin.H{"status": "success"})
+		count := ds.StoreBeans(beans)
+		c.JSON(http.StatusOK, gin.H{"status": "success", "count": count})
 	}
 }
 
@@ -26,8 +26,8 @@ func createStoreEmbeddingsHandler(ds *Ducksack) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		ds.StoreEmbeddings(embeddings)
-		c.JSON(http.StatusOK, gin.H{"status": "success"})
+		count := ds.StoreEmbeddings(embeddings)
+		c.JSON(http.StatusOK, gin.H{"status": "success", "count": count})
 	}
 }
 
@@ -38,8 +38,8 @@ func createStoreTagsHandler(ds *Ducksack) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		ds.StoreTags(tags)
-		c.JSON(http.StatusOK, gin.H{"status": "success"})
+		count := ds.StoreTags(tags)
+		c.JSON(http.StatusOK, gin.H{"status": "success", "count": count})
 	}
 }
 
@@ -51,8 +51,8 @@ func createStoreChatterHandler(ds *Ducksack) gin.HandlerFunc {
 			return
 		}
 
-		ds.StoreChatters(chatters)
-		c.JSON(http.StatusOK, gin.H{"status": "success"})
+		count := ds.StoreChatters(chatters)
+		c.JSON(http.StatusOK, gin.H{"status": "success", "count": count})
 	}
 }
 
@@ -64,8 +64,8 @@ func createStoreSourceHandler(ds *Ducksack) gin.HandlerFunc {
 			return
 		}
 
-		ds.StoreSources(sources)
-		c.JSON(http.StatusOK, gin.H{"status": "success"})
+		count := ds.StoreSources(sources)
+		c.JSON(http.StatusOK, gin.H{"status": "success", "count": count})
 	}
 }
 

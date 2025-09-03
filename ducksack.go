@@ -163,7 +163,7 @@ func (ds *Ducksack) StoreBeans(beans []Bean) int {
 
 func (ds *Ducksack) StoreEmbeddings(beans []Bean) int {
 	beans = datautils.Filter(beans, func(bean *Bean) bool {
-		return len(bean.Embedding) > 0
+		return len(bean.Embedding) == ds.dim
 	})
 	return appendToTable(ds, BEAN_EMBEDDINGS, beans, func(bean Bean) []driver.Value {
 		return []driver.Value{bean.URL, bean.Embedding}
