@@ -17,9 +17,6 @@ const (
 var SELECT_PUBLIC_FIELDS = []string{"url", "kind", "title", "summary", "author", "source", "created", "categories", "sentiments", "regions", "entities", "updated", "likes", "comments", "shares"}
 var SELECT_GISTS = []string{"url", "created", "updated", "gist", "categories", "sentiments", "regions", "entities"}
 var SELECT_EMBEDDINGS = []string{"url", "created", "updated", "embedding"}
-var ORDER_BY_CREATED = []string{"created DESC"}
-var ORDER_BY_DISTANCE = []string{"distance ASC"}
-var ORDER_BY_CHATTERS = []string{"DATE(updated) DESC", "comments DESC", "likes DESC", "shares DESC"}
 
 type BeansQueryRequest struct {
 	// these are query params
@@ -149,7 +146,7 @@ func validateVectorSearchRequest(c *gin.Context) {
 func createTrendingBeansHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
-		beans, err := findBeans(ds, req, nil, ORDER_BY_CHATTERS, nil)
+		beans, err := findBeans(ds, req, nil, ORDER_BY_UPDATED, nil)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -162,7 +159,7 @@ func createTrendingBeanDigestsHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
 		// pp.Println("req", req)
-		beans, err := findBeans(ds, req, nil, ORDER_BY_CHATTERS, SELECT_GISTS)
+		beans, err := findBeans(ds, req, nil, ORDER_BY_UPDATED, SELECT_GISTS)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -175,7 +172,7 @@ func createTrendingBeanDigestsHandler(ds *Ducksack) gin.HandlerFunc {
 func createTrendingBeanEmbeddingsHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
-		beans, err := findBeans(ds, req, []string{"embedding IS NOT NULL"}, ORDER_BY_CHATTERS, SELECT_EMBEDDINGS)
+		beans, err := findBeans(ds, req, []string{"embedding IS NOT NULL"}, ORDER_BY_UPDATED, SELECT_EMBEDDINGS)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
