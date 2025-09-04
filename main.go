@@ -10,11 +10,12 @@ import (
 )
 
 const (
-	DEFAULT_DB_PATH     = ""
-	DEFAULT_VECTOR_DIM  = 384
-	DEFAULT_RELATED_EPS = 0.43
-	DEFAULT_PORT        = "8080"
-	DB_NAME             = "beansack.db"
+	DEFAULT_DB_PATH                = ""
+	DEFAULT_VECTOR_DIM             = 384
+	DEFAULT_RELATED_EPS            = 0.43
+	DEFAULT_PORT                   = "8080"
+	DEFAULT_MAX_CONCURRENT_QUERIES = 2
+	DB_NAME                        = "beansack.db"
 )
 
 func main() {
@@ -56,12 +57,17 @@ func main() {
 		port = DEFAULT_PORT
 	}
 
+	throttle_max, err := strconv.Atoi(os.Getenv("MAX_CONCURRENT_QUERIES"))
+	if err != nil || throttle_max <= 0 {
+		throttle_max = DEFAULT_MAX_CONCURRENT_QUERIES
+	}
+
 	// initialize database
 	init, err := os.ReadFile("./factory/init.sql")
 	noerror(err, "READ SQL ERROR")
 	ds := NewBeansack(dbpath, string(init), dim, related_eps)
 	defer ds.Close()
 
-	r := initRoutes(ds)
+	r := initRoutes(ds, throttle_max)
 	noerror(r.Run(":"+port), "SERVER ERROR")
 }

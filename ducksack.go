@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
@@ -41,7 +42,7 @@ const (
 
 const (
 	HAS_CHATTERS      = "shares != 0"
-	GIST_IS_NOT_NULL  = "gist IS NOT NULL"
+	GIST_IS_NOT_NULL  = "gist IS NOT NULL AND gist <> ''"
 	ORDER_BY_DISTANCE = "distance ASC"
 	ORDER_BY_CREATED  = "created DESC"
 	ORDER_BY_UPDATED  = "DATE(updated) DESC, comments DESC, likes DESC, shares DESC"
@@ -57,8 +58,8 @@ type Ducksack struct {
 ////////// INITIALIZE DATABASE //////////
 
 func NewBeansack(dbpath string, initsql string, vector_dimensions int, related_eps float64) *Ducksack {
-	// conn, err := duckdb.NewConnector(fmt.Sprintf("%s?threads=%d", dbpath, max(1, runtime.NumCPU()-1)), nil)
-	conn, err := duckdb.NewConnector(dbpath, nil)
+	conn, err := duckdb.NewConnector(fmt.Sprintf("%s?threads=%d", dbpath, max(1, runtime.NumCPU()-1)), nil)
+	// conn, err := duckdb.NewConnector(dbpath, nil)
 	noerror(err, "CONNECTOR ERROR")
 
 	// open connection

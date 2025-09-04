@@ -7,6 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var query_throttler chan int
+
 func healthCheckHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status": "ok",
@@ -26,10 +28,18 @@ func createAuthVerificationHandler(expectedKeyName string) gin.HandlerFunc {
 	}
 }
 
-func initRoutes(ds *Ducksack) *gin.Engine {
-	// vector_query_throttle := make(chan int, max(1, runtime.NumCPU()>>1))
-	vector_query_throttle := make(chan int, 2)
+func enterQueryThrottler(c *gin.Context) {
+	query_throttler <- 1
+	c.Next()
+}
 
+func exitQueryThrottler(c *gin.Context) {
+	<-query_throttler
+	c.Next()
+}
+
+func initRoutes(ds *Ducksack, throttle_max int) *gin.Engine {
+	query_throttler = make(chan int, throttle_max)
 	r := gin.Default()
 	// Health check endpoint - no auth required
 	r.GET("/health", healthCheckHandler)
@@ -38,7 +48,7 @@ func initRoutes(ds *Ducksack) *gin.Engine {
 	// everything sorted by created_at DESC
 	public := r.Group("/public/beans", validateQueryRequest)
 	{
-		public.GET("/latest", createLatestBeansHandler(ds, vector_query_throttle))
+		public.GET("/latest", enterQueryThrottler, createLatestBeansHandler(ds), exitQueryThrottler)
 		public.GET("/exists", createExistsHandler(ds))
 		public.GET("/related", createRelatedBeansHandler(ds))
 		public.GET("/regions", createRegionsHandler(ds))
@@ -49,14 +59,13 @@ func initRoutes(ds *Ducksack) *gin.Engine {
 
 	// REGISTERED APPLICATION ENDPOINTS
 	// everything sorted by trending DESC
-	privileged := r.Group("/privileged/beans", createAuthVerificationHandler("PRIVILEGED_KEY"), validateQueryRequest)
+	privileged := r.Group("/privileged/beans", createAuthVerificationHandler("PRIVILEGED_KEY"), validateQueryRequest, enterQueryThrottler)
 	{
-		privileged.GET("/latest/contents", createLatestContentsHandler(ds, vector_query_throttle))
-		privileged.GET("/trending", createTrendingBeansHandler(ds, vector_query_throttle))
-		privileged.GET("/trending/tags", createTrendingTagsHandler(ds, vector_query_throttle))
-		privileged.GET("/trending/embeddings", createTrendingEmbeddingsHandler(ds, vector_query_throttle))
+		privileged.GET("/latest/contents", createLatestContentsHandler(ds), exitQueryThrottler)
+		privileged.GET("/trending", createTrendingBeansHandler(ds), exitQueryThrottler)
+		privileged.GET("/trending/tags", createTrendingTagsHandler(ds), exitQueryThrottler)
+		privileged.GET("/trending/embeddings", createTrendingEmbeddingsHandler(ds), exitQueryThrottler)
 	}
-
 	// CONTRIBUTOR ENDPOINTS
 	publisher := r.Group("/publisher", createAuthVerificationHandler("PUBLISHER_KEY"))
 	{

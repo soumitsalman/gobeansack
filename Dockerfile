@@ -32,8 +32,11 @@ COPY --from=flyio/litefs:0.5 /usr/local/bin/litefs /usr/local/bin/litefs
 # Create directory for SQLite database
 RUN mkdir -p /data
 
+ENV VECTOR_DIMENSIONS=384
+ENV RELATED_EPS=0.43
 ENV PORT=8080
-ENV DB_PATH=/data/beansack.db
+ENV DATA=/data
+ENV MAX_CONCURRENT_QUERIES=2
 ENV GIN_MODE=release
 
 EXPOSE 8080

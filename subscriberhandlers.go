@@ -64,7 +64,7 @@ func validateQueryRequest(c *gin.Context) {
 	c.Next()
 }
 
-func createLatestBeansHandler(ds *Ducksack, throttle chan int) gin.HandlerFunc {
+func createLatestBeansHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		order_by := ORDER_BY_CREATED
@@ -72,8 +72,10 @@ func createLatestBeansHandler(ds *Ducksack, throttle chan int) gin.HandlerFunc {
 			order_by = ORDER_BY_DISTANCE
 		}
 		query := buildQuery(ds, req).Columns(SELECT_PUBLIC_FIELDS...).Table(BEAN_AGGREGATES).Order(order_by)
-		// beans := ds.QueryBeans(query)
-		beans := runThrottledQuery(ds, query, req, throttle)
+		// beans := throttleQuery(throttle, func() any {
+		// 	return ds.QueryBeans(query)
+		// })
+		beans := ds.QueryBeans(query)
 		c.JSON(http.StatusOK, beans)
 	}
 }
@@ -142,30 +144,34 @@ func createExistsHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createLatestContentsHandler(ds *Ducksack, throttle chan int) gin.HandlerFunc {
+func createLatestContentsHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		query := buildQuery(ds, req).Table(BEAN_CORES).Order(ORDER_BY_CREATED)
-		// beans := ds.QueryBeans(query)
-		beans := runThrottledQuery(ds, query, req, throttle)
+		// beans := throttleQuery(throttle, func() any {
+		// 	return ds.QueryBeans(query)
+		// })
+		beans := ds.QueryBeans(query)
 		c.JSON(http.StatusOK, beans)
 	}
 }
 
-func createTrendingBeansHandler(ds *Ducksack, throttle chan int) gin.HandlerFunc {
+func createTrendingBeansHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		query := buildQuery(ds, req).
 			Table(BEAN_AGGREGATES).
 			Where(HAS_CHATTERS).
 			Order(ORDER_BY_UPDATED)
-		// beans := ds.QueryBeans(query)
-		beans := runThrottledQuery(ds, query, req, throttle)
+		// beans := throttleQuery(throttle, func() any {
+		// 	return ds.QueryBeans(query)
+		// })
+		beans := ds.QueryBeans(query)
 		c.JSON(http.StatusOK, beans)
 	}
 }
 
-func createTrendingTagsHandler(ds *Ducksack, throttle chan int) gin.HandlerFunc {
+func createTrendingTagsHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		query := buildQuery(ds, req).
@@ -173,13 +179,15 @@ func createTrendingTagsHandler(ds *Ducksack, throttle chan int) gin.HandlerFunc 
 			Table(BEAN_AGGREGATES).
 			Where(GIST_IS_NOT_NULL, HAS_CHATTERS).
 			Order(ORDER_BY_UPDATED)
-		// beans := ds.QueryBeans(query)
-		beans := runThrottledQuery(ds, query, req, throttle)
+		// beans := throttleQuery(throttle, func() any {
+		// 	return ds.QueryBeans(query)
+		// })
+		beans := ds.QueryBeans(query)
 		c.JSON(http.StatusOK, beans)
 	}
 }
 
-func createTrendingEmbeddingsHandler(ds *Ducksack, throttle chan int) gin.HandlerFunc {
+func createTrendingEmbeddingsHandler(ds *Ducksack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		query := buildQuery(ds, req).
@@ -187,22 +195,27 @@ func createTrendingEmbeddingsHandler(ds *Ducksack, throttle chan int) gin.Handle
 			Table(BEAN_AGGREGATES).
 			Where(HAS_CHATTERS).
 			Order(ORDER_BY_UPDATED)
-		// beans := ds.QueryBeans(query)
-		beans := runThrottledQuery(ds, query, req, throttle)
+		// beans := throttleQuery(throttle, func() any {
+		// 	return ds.QueryBeans(query)
+		// })
+		beans := ds.QueryBeans(query)
 		c.JSON(http.StatusOK, beans)
 	}
 }
 
-func runThrottledQuery(ds *Ducksack, query *SelectExpr, req *QueryRequest, throttle chan int) []Bean {
-	if req.Embedding != nil {
-		throttle <- 1
-	}
-	beans := ds.QueryBeans(query)
-	if req.Embedding != nil {
-		<-throttle
-	}
-	return beans
-}
+// func throttleQuery(throttle chan int, f func() any) any {
+// 	throttle <- 1
+// 	result := f()
+// 	<-throttle
+// 	return result
+// }
+
+// func runThrottledQuery(ds *Ducksack, query *SelectExpr, throttle chan int) []Bean {
+// 	throttle <- 1
+// 	beans := ds.QueryBeans(query)
+// 	<-throttle
+// 	return beans
+// }
 
 func buildQuery(ds *Ducksack, req *QueryRequest) *SelectExpr {
 	query := NewSelect(ds).
