@@ -21,7 +21,7 @@ type SelectExpr struct {
 	dim     int
 }
 
-func NewSelect(ds *Ducksack) *SelectExpr {
+func NewSelect(ds *BeanSack) *SelectExpr {
 	return &SelectExpr{
 		table:   "",
 		columns: []ExprWithArg{},

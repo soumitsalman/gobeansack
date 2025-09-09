@@ -14,9 +14,11 @@ const (
 	MAX_LIMIT     int = 512
 )
 
-var SELECT_PUBLIC_FIELDS = []string{"url", "kind", "title", "summary", "author", "source", "created", "categories", "sentiments", "regions", "entities", "updated", "likes", "comments", "shares"}
-var SELECT_GISTS = []string{"url", "created", "updated", "gist", "categories", "sentiments", "regions", "entities"}
-var SELECT_EMBEDDINGS = []string{"url", "created", "updated", "embedding"}
+const CORE_FIELDS_ONLY = "* EXCLUDE (embedding, gist)"
+
+var PUBLIC_FIELDS = []string{"url", "kind", "title", "summary", "author", "source", "created", "categories", "sentiments", "regions", "entities", "updated", "likes", "comments", "shares"}
+var TAG_FIELDS = []string{"url", "created", "updated", "gist", "categories", "sentiments", "regions", "entities"}
+var EMBEDDING_FIELDS = []string{"url", "created", "updated", "embedding"}
 
 type QueryRequest struct {
 	// these custom fields. some of these can be passed as a query params
@@ -31,8 +33,8 @@ type QueryRequest struct {
 	URLs        []string  `json:"urls,omitempty"`
 
 	// for more flexible query
-	Where         []string `json:"where"`
-	MissingFields []string `json:"missing_fields"`
+	Where []string `json:"where"`
+	// MissingFields []string `json:"missing_fields"`
 
 	// for pagination
 	Offset int `form:"offset" json:"offset" binding:"min=0"`
@@ -64,23 +66,20 @@ func validateQueryRequest(c *gin.Context) {
 	c.Next()
 }
 
-func createLatestBeansHandler(ds *Ducksack) gin.HandlerFunc {
+func createLatestBeansHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		order_by := ORDER_BY_CREATED
 		if len(req.Embedding) > 0 {
 			order_by = ORDER_BY_DISTANCE
 		}
-		query := buildQuery(ds, req).Columns(SELECT_PUBLIC_FIELDS...).Table(BEAN_AGGREGATES).Order(order_by)
-		// beans := throttleQuery(throttle, func() any {
-		// 	return ds.QueryBeans(query)
-		// })
+		query := buildQuery(ds, req).Columns(PUBLIC_FIELDS...).Table(AGGREGATES_BEANS).Order(order_by)
 		beans := ds.QueryBeans(query)
 		c.JSON(http.StatusOK, beans)
 	}
 }
 
-func createRelatedBeansHandler(ds *Ducksack) gin.HandlerFunc {
+func createRelatedBeansHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		if len(req.URLs) == 0 {
@@ -91,7 +90,7 @@ func createRelatedBeansHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createRegionsHandler(ds *Ducksack) gin.HandlerFunc {
+func createRegionsHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		if len(req.URLs) > 0 {
@@ -102,7 +101,7 @@ func createRegionsHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createEntitiesHandler(ds *Ducksack) gin.HandlerFunc {
+func createEntitiesHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		if len(req.URLs) > 0 {
@@ -113,7 +112,7 @@ func createEntitiesHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createCategoriesHandler(ds *Ducksack) gin.HandlerFunc {
+func createCategoriesHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		if len(req.URLs) > 0 {
@@ -124,7 +123,7 @@ func createCategoriesHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createSourcesHandler(ds *Ducksack) gin.HandlerFunc {
+func createSourcesHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		if len(req.DomainNames) > 0 {
@@ -137,87 +136,64 @@ func createSourcesHandler(ds *Ducksack) gin.HandlerFunc {
 
 ////////// PRIVILEGED //////////
 
-func createExistsHandler(ds *Ducksack) gin.HandlerFunc {
+func createExistsHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		c.JSON(http.StatusOK, ds.Exists(req.URLs))
 	}
 }
 
-func createLatestContentsHandler(ds *Ducksack) gin.HandlerFunc {
+func createLatestUntaggedBeansHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
-		query := buildQuery(ds, req).Table(BEAN_CORES).Order(ORDER_BY_CREATED)
-		// beans := throttleQuery(throttle, func() any {
-		// 	return ds.QueryBeans(query)
-		// })
+		query := buildQuery(ds, req).
+			Columns(CORE_FIELDS_ONLY).
+			Table(UNTAGGED_BEANS).
+			Order(ORDER_BY_CREATED)
 		beans := ds.QueryBeans(query)
 		c.JSON(http.StatusOK, beans)
 	}
 }
 
-func createTrendingBeansHandler(ds *Ducksack) gin.HandlerFunc {
+func createTrendingBeansHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		query := buildQuery(ds, req).
-			Table(BEAN_AGGREGATES).
+			Table(AGGREGATES_BEANS).
 			Where(HAS_CHATTERS).
 			Order(ORDER_BY_UPDATED)
-		// beans := throttleQuery(throttle, func() any {
-		// 	return ds.QueryBeans(query)
-		// })
 		beans := ds.QueryBeans(query)
 		c.JSON(http.StatusOK, beans)
 	}
 }
 
-func createTrendingTagsHandler(ds *Ducksack) gin.HandlerFunc {
+func createTrendingTagsHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		query := buildQuery(ds, req).
-			Columns(SELECT_GISTS...).
-			Table(BEAN_AGGREGATES).
+			Columns(TAG_FIELDS...).
+			Table(AGGREGATES_BEANS).
 			Where(GIST_IS_NOT_NULL, HAS_CHATTERS).
 			Order(ORDER_BY_UPDATED)
-		// beans := throttleQuery(throttle, func() any {
-		// 	return ds.QueryBeans(query)
-		// })
 		beans := ds.QueryBeans(query)
 		c.JSON(http.StatusOK, beans)
 	}
 }
 
-func createTrendingEmbeddingsHandler(ds *Ducksack) gin.HandlerFunc {
+func createTrendingEmbeddingsHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(*QueryRequest)
 		query := buildQuery(ds, req).
-			Columns(SELECT_EMBEDDINGS...).
-			Table(BEAN_AGGREGATES).
+			Columns(EMBEDDING_FIELDS...).
+			Table(AGGREGATES_BEANS).
 			Where(HAS_CHATTERS).
 			Order(ORDER_BY_UPDATED)
-		// beans := throttleQuery(throttle, func() any {
-		// 	return ds.QueryBeans(query)
-		// })
 		beans := ds.QueryBeans(query)
 		c.JSON(http.StatusOK, beans)
 	}
 }
 
-// func throttleQuery(throttle chan int, f func() any) any {
-// 	throttle <- 1
-// 	result := f()
-// 	<-throttle
-// 	return result
-// }
-
-// func runThrottledQuery(ds *Ducksack, query *SelectExpr, throttle chan int) []Bean {
-// 	throttle <- 1
-// 	beans := ds.QueryBeans(query)
-// 	<-throttle
-// 	return beans
-// }
-
-func buildQuery(ds *Ducksack, req *QueryRequest) *SelectExpr {
+func buildQuery(ds *BeanSack, req *QueryRequest) *SelectExpr {
 	query := NewSelect(ds).
 		Where(req.Where...).
 		Offset(req.Offset).
@@ -234,7 +210,7 @@ func buildQuery(ds *Ducksack, req *QueryRequest) *SelectExpr {
 		req.Embedding,
 		req.MaxDistance,
 	)
-	query = whereColumnNotExists(query, req.MissingFields...)
+	// query = whereColumnNotExists(query, req.MissingFields...)
 	return query
 }
 
@@ -279,26 +255,26 @@ func whereForCustomColumns(q *SelectExpr,
 	return q
 }
 
-const _SQL_MISSING_COLUMN = "url NOT IN (SELECT url FROM %s)"
+// const _SQL_MISSING_COLUMN = "url NOT IN (SELECT url FROM %s)"
 
-func whereColumnNotExists(q *SelectExpr, columns ...string) *SelectExpr {
-	for _, column := range columns {
-		switch column {
-		case "gist":
-			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_GISTS))
-		case "embedding":
-			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_EMBEDDINGS))
-		case "category":
-			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_CATEGORIES))
-		case "sentiment":
-			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_SENTIMENTS))
-		case "region":
-		case "regions":
-			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_REGIONS))
-		case "entity":
-		case "entities":
-			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_ENTITIES))
-		}
-	}
-	return q
-}
+// func whereColumnNotExists(q *SelectExpr, columns ...string) *SelectExpr {
+// 	for _, column := range columns {
+// 		switch column {
+// 		case "gist":
+// 			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_GISTS))
+// 		case "embedding":
+// 			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_EMBEDDINGS))
+// 		case "category":
+// 			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_CATEGORIES))
+// 		case "sentiment":
+// 			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_SENTIMENTS))
+// 		case "region":
+// 		case "regions":
+// 			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_REGIONS))
+// 		case "entity":
+// 		case "entities":
+// 			q.Where(fmt.Sprintf(_SQL_MISSING_COLUMN, BEAN_ENTITIES))
+// 		}
+// 	}
+// 	return q
+// }

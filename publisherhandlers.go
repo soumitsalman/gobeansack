@@ -7,7 +7,7 @@ import (
 )
 
 // //////// STORE HANDLERS //////////
-func createStoreBeansHandler(ds *Ducksack) gin.HandlerFunc {
+func createStoreBeansHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var beans []Bean
 		if err := c.ShouldBindJSON(&beans); err != nil {
@@ -19,7 +19,7 @@ func createStoreBeansHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createStoreEmbeddingsHandler(ds *Ducksack) gin.HandlerFunc {
+func createStoreEmbeddingsHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var embeddings []Bean
 		if err := c.ShouldBindJSON(&embeddings); err != nil {
@@ -31,7 +31,7 @@ func createStoreEmbeddingsHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createStoreTagsHandler(ds *Ducksack) gin.HandlerFunc {
+func createStoreTagsHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var tags []Bean
 		if err := c.ShouldBindJSON(&tags); err != nil {
@@ -43,7 +43,7 @@ func createStoreTagsHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createStoreChatterHandler(ds *Ducksack) gin.HandlerFunc {
+func createStoreChatterHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var chatters []Chatter
 		if err := c.ShouldBindJSON(&chatters); err != nil {
@@ -56,7 +56,7 @@ func createStoreChatterHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createStoreSourceHandler(ds *Ducksack) gin.HandlerFunc {
+func createStoreSourceHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var sources []Source
 		if err := c.ShouldBindJSON(&sources); err != nil {
@@ -88,7 +88,7 @@ func validateDeleteRequest(c *gin.Context) {
 	c.Next()
 }
 
-func createDeleteBeansHandler(ds *Ducksack) gin.HandlerFunc {
+func createDeleteBeansHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(DeleteRequests)
 		err := ds.DeleteBeans(req.Where...)
@@ -100,7 +100,7 @@ func createDeleteBeansHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createDeleteChattersHandler(ds *Ducksack) gin.HandlerFunc {
+func createDeleteChattersHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(DeleteRequests)
 		err := ds.DeleteChatters(req.Where...)
@@ -112,7 +112,7 @@ func createDeleteChattersHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createDeleteSourcesHandler(ds *Ducksack) gin.HandlerFunc {
+func createDeleteSourcesHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(DeleteRequests)
 		err := ds.DeleteSources(req.Where...)

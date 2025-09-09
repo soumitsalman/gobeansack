@@ -15,6 +15,7 @@ const (
 	DEFAULT_RELATED_EPS            = 0.43
 	DEFAULT_PORT                   = "8080"
 	DEFAULT_MAX_CONCURRENT_QUERIES = 2
+	DEFAULT_REFRESH_TIME           = 5 // in minutes
 	DB_NAME                        = "beansack.db"
 )
 
@@ -51,23 +52,28 @@ func main() {
 		related_eps = DEFAULT_RELATED_EPS
 	}
 
+	throttle_max, err := strconv.Atoi(os.Getenv("MAX_CONCURRENT_QUERIES"))
+	if err != nil || throttle_max <= 0 {
+		throttle_max = DEFAULT_MAX_CONCURRENT_QUERIES
+	}
+
+	refresh_time, err := strconv.Atoi(os.Getenv("REFRESH_TIME"))
+	if err != nil || refresh_time <= 0 {
+		refresh_time = DEFAULT_REFRESH_TIME // default refresh time in minutes
+	}
+
 	// server port
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = DEFAULT_PORT
 	}
 
-	throttle_max, err := strconv.Atoi(os.Getenv("MAX_CONCURRENT_QUERIES"))
-	if err != nil || throttle_max <= 0 {
-		throttle_max = DEFAULT_MAX_CONCURRENT_QUERIES
-	}
-
 	// initialize database
 	init, err := os.ReadFile("./factory/init.sql")
 	noerror(err, "READ SQL ERROR")
-	ds := NewBeansack(dbpath, string(init), dim, related_eps)
-	defer ds.Close()
 
-	r := initRoutes(ds, throttle_max)
-	noerror(r.Run(":"+port), "SERVER ERROR")
+	engine := NewEngine(dbpath, string(init), dim, related_eps, throttle_max, refresh_time)
+	defer engine.ds.Close()
+
+	noerror(engine.Run(":"+port), "SERVER ERROR")
 }

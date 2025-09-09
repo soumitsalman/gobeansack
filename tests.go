@@ -20,7 +20,7 @@ const (
 
 var testCtx = context.Background()
 
-func setupTestDB(t *testing.T) *Ducksack {
+func setupTestDB(t *testing.T) *BeanSack {
 	// Load configuration from environment variables
 	err := godotenv.Load(".env")
 	if err != nil {
@@ -41,7 +41,7 @@ func setupTestDB(t *testing.T) *Ducksack {
 	}
 	initsql := string(init)
 
-	ds := NewBeansack(dbpath, initsql, dim, cluster_eps)
+	ds := NewDuckSack(dbpath, initsql, dim, cluster_eps)
 	t.Cleanup(func() {
 		ds.Close()
 	})

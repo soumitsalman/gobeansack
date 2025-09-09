@@ -6,8 +6,8 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -19,20 +19,21 @@ import (
 )
 
 const (
-	BEAN_CORES      = "bean_cores"
-	BEAN_EMBEDDINGS = "bean_embeddings"
-	BEAN_CLUSTERS   = "bean_clusters"
-	BEAN_CATEGORIES = "bean_categories"
-	BEAN_SENTIMENTS = "bean_sentiments"
-	BEAN_GISTS      = "bean_gists"
-	BEAN_REGIONS    = "bean_regions"
-	BEAN_ENTITIES   = "bean_entities"
-	BEAN_CHATTERS   = "bean_chatters"
-	BEAN_AGGREGATES = "bean_aggregates"
-	CHATTERS        = "chatters"
-	SOURCES         = "sources"
-	CATEGORIES      = "categories"
-	SENTIMENTS      = "sentiments"
+	BEAN_CORES       = "bean_cores"
+	BEAN_EMBEDDINGS  = "bean_embeddings"
+	BEAN_CLUSTERS    = "bean_clusters"
+	BEAN_CATEGORIES  = "bean_categories"
+	BEAN_SENTIMENTS  = "bean_sentiments"
+	BEAN_GISTS       = "bean_gists"
+	BEAN_REGIONS     = "bean_regions"
+	BEAN_ENTITIES    = "bean_entities"
+	BEAN_CHATTERS    = "bean_chatters"
+	AGGREGATES_BEANS = "aggregated_beans"
+	UNTAGGED_BEANS   = "untagged_beans_view"
+	CHATTERS         = "chatters"
+	SOURCES          = "sources"
+	CATEGORIES       = "categories"
+	SENTIMENTS       = "sentiments"
 )
 
 const (
@@ -42,44 +43,58 @@ const (
 
 const (
 	HAS_CHATTERS      = "shares != 0"
-	GIST_IS_NOT_NULL  = "gist IS NOT NULL AND gist <> ''"
+	GIST_IS_NOT_NULL  = "gist IS NOT NULL"
 	ORDER_BY_DISTANCE = "distance ASC"
 	ORDER_BY_CREATED  = "created DESC"
 	ORDER_BY_UPDATED  = "DATE(updated) DESC, comments DESC, likes DESC, shares DESC"
 )
 
-type Ducksack struct {
-	connector *duckdb.Connector
-	db        *sql.DB
-	query     *sqlx.DB
-	dim       int
-}
-
-////////// INITIALIZE DATABASE //////////
-
-func NewBeansack(dbpath string, initsql string, vector_dimensions int, related_eps float64) *Ducksack {
-	conn, err := duckdb.NewConnector(fmt.Sprintf("%s?threads=%d", dbpath, max(1, runtime.NumCPU()-1)), nil)
-	// conn, err := duckdb.NewConnector(dbpath, nil)
-	noerror(err, "CONNECTOR ERROR")
-
-	// open connection
-	db := sql.OpenDB(conn)
-	if initsql != "" {
-		_, err = db.Exec(fmt.Sprintf(initsql, vector_dimensions, related_eps))
-		noerror(err, "INIT SQL ERROR")
-	}
-
-	return &Ducksack{
-		connector: conn,
-		db:        db,
-		query:     sqlx.NewDb(db, "duckdb"),
-		dim:       vector_dimensions,
-	}
+type BeanSack struct {
+	connector     *duckdb.Connector
+	db            *sql.DB
+	query         *sqlx.DB
+	dim           int
+	needs_refresh atomic.Bool
 }
 
 ////////// STORING FUNCTIONS //////////
 
-func appendToTable[T any](ds *Ducksack, table string, data []T, getfieldvalues func(item T) []driver.Value) int {
+func (ds *BeanSack) StoreBeans(beans []Bean) int {
+	beans = prepareBeans(beans)
+	count := appendToTable(ds, BEAN_CORES, beans, func(bean Bean) []driver.Value {
+		return []driver.Value{bean.URL, bean.Kind, bean.Title, bean.TitleLength, bean.Content, bean.ContentLength, bean.RestrictedContent, bean.Summary, bean.SummaryLength, bean.Author, bean.Source, bean.Created, bean.Collected}
+	})
+	ds.needs_refresh.Store(true)
+	return count
+}
+
+func (ds *BeanSack) StoreEmbeddings(beans []Bean) int {
+	beans = datautils.Filter(beans, func(bean *Bean) bool {
+		return len(bean.Embedding) == ds.dim
+	})
+	count := appendToTable(ds, BEAN_EMBEDDINGS, beans, func(bean Bean) []driver.Value {
+		return []driver.Value{bean.URL, bean.Embedding}
+	})
+	ds.needs_refresh.Store(true)
+	return count
+}
+
+func (ds *BeanSack) StoreChatters(chatters []Chatter) int {
+	chatters = prepareChatters(chatters)
+	count := appendToTable(ds, CHATTERS, chatters, func(chatter Chatter) []driver.Value {
+		return []driver.Value{chatter.ChatterURL, chatter.BeanURL, chatter.Collected, chatter.Source, chatter.Forum, chatter.Likes, chatter.Comments, chatter.Subscribers}
+	})
+	ds.needs_refresh.Store(true)
+	return count
+}
+
+func (ds *BeanSack) StoreSources(sources []Source) int {
+	return appendToTable(ds, SOURCES, sources, func(source Source) []driver.Value {
+		return []driver.Value{source.Name, source.Description, source.BaseURL, source.DomainName, source.Favicon, source.RSSFeed}
+	})
+}
+
+func appendToTable[T any](ds *BeanSack, table string, data []T, getfieldvalues func(item T) []driver.Value) int {
 	if data == nil {
 		return 0
 	}
@@ -159,22 +174,6 @@ func prepareBeans(beans []Bean) []Bean {
 // 	return count
 // }
 
-func (ds *Ducksack) StoreBeans(beans []Bean) int {
-	beans = prepareBeans(beans)
-	return appendToTable(ds, BEAN_CORES, beans, func(bean Bean) []driver.Value {
-		return []driver.Value{bean.URL, bean.Kind, bean.Title, bean.TitleLength, bean.Content, bean.ContentLength, bean.RestrictedContent, bean.Summary, bean.SummaryLength, bean.Author, bean.Source, bean.Created, bean.Collected}
-	})
-}
-
-func (ds *Ducksack) StoreEmbeddings(beans []Bean) int {
-	beans = datautils.Filter(beans, func(bean *Bean) bool {
-		return len(bean.Embedding) == ds.dim
-	})
-	return appendToTable(ds, BEAN_EMBEDDINGS, beans, func(bean Bean) []driver.Value {
-		return []driver.Value{bean.URL, bean.Embedding}
-	})
-}
-
 func flattenTags(url string, data []string) []TagData {
 	return datautils.FilterAndTransform(data, func(tag *string) (bool, TagData) {
 		return len(*tag) > 0, TagData{URL: url, Tag: *tag}
@@ -210,7 +209,7 @@ func prepareTags(beans []Bean) map[string][]TagData {
 	return results
 }
 
-func (ds *Ducksack) storeTagsToTable(tags []TagData, tag_table string) int {
+func (ds *BeanSack) storeTagsToTable(tags []TagData, tag_table string) int {
 	if len(tags) == 0 {
 		return 0
 	}
@@ -219,7 +218,7 @@ func (ds *Ducksack) storeTagsToTable(tags []TagData, tag_table string) int {
 	})
 }
 
-func (ds *Ducksack) StoreTags(beans []Bean) int {
+func (ds *BeanSack) StoreTags(beans []Bean) int {
 	tags := prepareTags(beans)
 	count := 0
 	if categories, ok := tags[BEAN_CATEGORIES]; ok {
@@ -250,17 +249,27 @@ func prepareChatters(chatters []Chatter) []Chatter {
 	return chatters
 }
 
-func (ds *Ducksack) StoreChatters(chatters []Chatter) int {
-	chatters = prepareChatters(chatters)
-	return appendToTable(ds, CHATTERS, chatters, func(chatter Chatter) []driver.Value {
-		return []driver.Value{chatter.ChatterURL, chatter.BeanURL, chatter.Collected, chatter.Source, chatter.Forum, chatter.Likes, chatter.Comments, chatter.Subscribers}
-	})
-}
+const _REFRESH_AGGREGATES = `
+DROP TABLE IF EXISTS aggregated_beans;
+CREATE TABLE IF NOT EXISTS aggregated_beans AS 
+SELECT * FROM aggregated_beans_view;
 
-func (ds *Ducksack) StoreSources(sources []Source) int {
-	return appendToTable(ds, SOURCES, sources, func(source Source) []driver.Value {
-		return []driver.Value{source.Name, source.Description, source.BaseURL, source.DomainName, source.Favicon, source.RSSFeed}
-	})
+-- DROP TABLE IF EXISTS untagged_beans;
+-- CREATE TABLE IF NOT EXISTS untagged_beans AS 
+-- SELECT * FROM untagged_beans_view;
+`
+
+func (ds *BeanSack) Refresh() {
+	log.Info("REFRESH TRIGGERED")
+	if ds.needs_refresh.Load() {
+		_, err := ds.db.Exec(_REFRESH_AGGREGATES)
+		if err != nil {
+			logwarningf(err, "refresh aggregates failed")
+		} else {
+			log.Info("refresh aggregates succeeded")
+		}
+		ds.needs_refresh.Store(false)
+	}
 }
 
 ////////// QUERY HELPERS //////////
@@ -271,7 +280,7 @@ func mustIn(query string, args ...any) (string, []any) {
 	return query, args
 }
 
-func mustSelect[T any](ds *Ducksack, query string, args ...any) []T {
+func mustSelect[T any](ds *BeanSack, query string, args ...any) []T {
 	var data []T
 	noerror(ds.query.Select(&data, query, args...), "query failed")
 	log.WithFields(log.Fields{"query": query, "params": len(args), "num_items": len(data)}).Info("query succeeded")
@@ -286,7 +295,7 @@ func shouldIn(query string, args ...any) (string, []any, error) {
 	return query, args, err
 }
 
-func shouldSelect[T any](ds *Ducksack, query string, args ...any) ([]T, error) {
+func shouldSelect[T any](ds *BeanSack, query string, args ...any) ([]T, error) {
 	var data []T
 	err := ds.query.Select(&data, query, args...)
 	if err != nil {
@@ -297,7 +306,7 @@ func shouldSelect[T any](ds *Ducksack, query string, args ...any) ([]T, error) {
 	return data, err
 }
 
-func getBeans[T any](ds *Ducksack, query string, urls []string) []T {
+func getBeans[T any](ds *BeanSack, query string, urls []string) []T {
 	if len(urls) == 0 {
 		return nil
 	}
@@ -314,54 +323,54 @@ func getBeans[T any](ds *Ducksack, query string, urls []string) []T {
 
 ////////// DIRECT QUERY/GET FUNCTIONS //////////
 
-func (ds *Ducksack) Exists(urls []string) []string {
+func (ds *BeanSack) Exists(urls []string) []string {
 	return getBeans[string](ds, "SELECT url FROM bean_cores WHERE url IN (?);", urls)
 }
 
-func (ds *Ducksack) GetBeans(urls []string) []Bean {
+func (ds *BeanSack) GetBeans(urls []string) []Bean {
 	const _SQL_QUERY_BEANS = `
 	SELECT * FROM bean_aggregates
 	WHERE url IN (?);`
 	return getBeans[Bean](ds, _SQL_QUERY_BEANS, urls)
 }
 
-func (ds *Ducksack) GetEmbeddings(urls []string) []Bean {
+func (ds *BeanSack) GetEmbeddings(urls []string) []Bean {
 	return getBeans[Bean](ds, "SELECT * FROM bean_embeddings WHERE url IN (?);", urls)
 }
 
-func (ds *Ducksack) GetGists(urls []string) []Bean {
+func (ds *BeanSack) GetGists(urls []string) []Bean {
 	return getBeans[Bean](ds, "SELECT * FROM bean_gists WHERE url IN (?);", urls)
 }
 
-func (ds *Ducksack) GetRegions(urls []string) []Bean {
+func (ds *BeanSack) GetRegions(urls []string) []Bean {
 	const _SQL_QUERY_REGIONS = `
 	SELECT url, regions FROM bean_aggregates
 	WHERE url IN (?);`
 	return getBeans[Bean](ds, _SQL_QUERY_REGIONS, urls)
 }
 
-func (ds *Ducksack) GetEntities(urls []string) []Bean {
+func (ds *BeanSack) GetEntities(urls []string) []Bean {
 	const _SQL_QUERY_ENTITIES = `
 	SELECT url, entities FROM bean_aggregates
 	WHERE url IN (?);`
 	return getBeans[Bean](ds, _SQL_QUERY_ENTITIES, urls)
 }
 
-func (ds *Ducksack) GetCategories(urls []string) []Bean {
+func (ds *BeanSack) GetCategories(urls []string) []Bean {
 	const _SQL_QUERY_CATEGORIES = `
 	SELECT url, categories FROM bean_aggregates
 	WHERE url IN (?);`
 	return getBeans[Bean](ds, _SQL_QUERY_CATEGORIES, urls)
 }
 
-func (ds *Ducksack) GetSentiments(urls []string) []Bean {
+func (ds *BeanSack) GetSentiments(urls []string) []Bean {
 	const _SQL_QUERY_SENTIMENTS = `
 	SELECT url, sentiments FROM bean_aggregates
 	WHERE url IN (?);`
 	return getBeans[Bean](ds, _SQL_QUERY_SENTIMENTS, urls)
 }
 
-func (ds *Ducksack) GetRelated(urls []string) []Bean {
+func (ds *BeanSack) GetRelated(urls []string) []Bean {
 	const _SQL_QUERY_CLUSTERS = `
 	SELECT url, LIST(DISTINCT related) AS related FROM bean_clusters
 	WHERE url IN (?) 
@@ -369,15 +378,15 @@ func (ds *Ducksack) GetRelated(urls []string) []Bean {
 	return getBeans[Bean](ds, _SQL_QUERY_CLUSTERS, urls)
 }
 
-func (ds *Ducksack) GetChatters(urls []string) []Chatter {
+func (ds *BeanSack) GetChatters(urls []string) []Chatter {
 	return getBeans[Chatter](ds, "SELECT * FROM chatters WHERE bean_url IN (?) ORDER BY collected DESC;", urls)
 }
 
-func (ds *Ducksack) GetBeanChatters(urls []string) []ChatterAggregate {
+func (ds *BeanSack) GetBeanChatters(urls []string) []ChatterAggregate {
 	return getBeans[ChatterAggregate](ds, "SELECT * FROM bean_chatters WHERE url IN (?);", urls)
 }
 
-func (ds *Ducksack) GetSources(domain_names []string) []Source {
+func (ds *BeanSack) GetSources(domain_names []string) []Source {
 	const _SQL_QUERY_SOURCES = `
 	SELECT * FROM sources
 	WHERE domain_name IN (?);`
@@ -386,27 +395,27 @@ func (ds *Ducksack) GetSources(domain_names []string) []Source {
 
 ////////// DISTINCT ITEMS //////////
 
-func (ds *Ducksack) DistinctRegions() []string {
+func (ds *BeanSack) DistinctRegions() []string {
 	const _SQL_GET_ALL_REGIONS = `SELECT DISTINCT region FROM bean_regions;`
 	return mustSelect[string](ds, _SQL_GET_ALL_REGIONS)
 }
 
-func (ds *Ducksack) DistinctEntities() []string {
+func (ds *BeanSack) DistinctEntities() []string {
 	const _SQL_GET_ALL_ENTITIES = `SELECT DISTINCT entity FROM bean_entities;`
 	return mustSelect[string](ds, _SQL_GET_ALL_ENTITIES)
 }
 
-func (ds *Ducksack) DistinctCategories() []string {
+func (ds *BeanSack) DistinctCategories() []string {
 	const _SQL_GET_ALL_CATEGORIES = `SELECT DISTINCT category FROM bean_categories;`
 	return mustSelect[string](ds, _SQL_GET_ALL_CATEGORIES)
 }
 
-func (ds *Ducksack) DistinctSentiments() []string {
+func (ds *BeanSack) DistinctSentiments() []string {
 	const _SQL_GET_ALL_SENTIMENTS = `SELECT DISTINCT sentiment FROM bean_sentiments;`
 	return mustSelect[string](ds, _SQL_GET_ALL_SENTIMENTS)
 }
 
-func (ds *Ducksack) DistinctSources() []string {
+func (ds *BeanSack) DistinctSources() []string {
 	const _SQL_GET_ALL_SOURCES = `SELECT DISTINCT source FROM bean_cores;`
 	return mustSelect[string](ds, _SQL_GET_ALL_SOURCES)
 }
@@ -531,7 +540,7 @@ func (ds *Ducksack) DistinctSources() []string {
 // 	return shouldSelect[Bean](ds, sql, paging_params...)
 // }
 
-func (ds *Ducksack) QueryBeanCores(
+func (ds *BeanSack) QueryBeanCores(
 	where []string,
 	order []string,
 	offset int,
@@ -546,14 +555,14 @@ func (ds *Ducksack) QueryBeanCores(
 	return ds.QueryBeans(query)
 }
 
-func (ds *Ducksack) QueryBeanAggregates(
+func (ds *BeanSack) QueryAggregatedBeans(
 	where []string,
 	order []string,
 	offset int,
 	limit int,
 ) []Bean {
 	query := NewSelect(ds).
-		Table(BEAN_AGGREGATES).
+		Table(AGGREGATES_BEANS).
 		Where(where...).
 		Offset(offset).
 		Limit(limit)
@@ -561,8 +570,9 @@ func (ds *Ducksack) QueryBeanAggregates(
 	return ds.QueryBeans(query)
 }
 
-func (ds *Ducksack) QueryBeans(query *SelectExpr) []Bean {
+func (ds *BeanSack) QueryBeans(query *SelectExpr) []Bean {
 	sql, params := query.ToSQL()
+	fmt.Println(sql)
 	sql, params, err := shouldIn(sql, params...)
 	if err != nil {
 		return nil
@@ -585,7 +595,7 @@ const _SQL_DELETE_BEAN_CHATTERS = `DELETE FROM chatters WHERE bean_url IN (SELEC
 const _SQL_DELETE_CHATTERS = `DELETE FROM chatters %s;`
 const _SQL_DELETE_SOURCES = `DELETE FROM sources %s;`
 
-func (ds *Ducksack) DeleteBeans(wheres ...string) error {
+func (ds *BeanSack) DeleteBeans(wheres ...string) error {
 	where_sql := combineWhereExprs(wheres...)
 	errs := []error{}
 	_, err := ds.db.Exec(fmt.Sprintf(_SQL_DELETE_BEAN_GISTS, where_sql))
@@ -607,14 +617,14 @@ func (ds *Ducksack) DeleteBeans(wheres ...string) error {
 	return errors.Join(errs...)
 }
 
-func (ds *Ducksack) DeleteChatters(wheres ...string) error {
+func (ds *BeanSack) DeleteChatters(wheres ...string) error {
 	where_sql := combineWhereExprs(wheres...)
 	_, err := ds.db.Exec(fmt.Sprintf(_SQL_DELETE_CHATTERS, where_sql))
 	noerror(err, "DELETE CHATTERS ERROR")
 	return err
 }
 
-func (ds *Ducksack) DeleteSources(wheres ...string) error {
+func (ds *BeanSack) DeleteSources(wheres ...string) error {
 	where_sql := combineWhereExprs(wheres...)
 	_, err := ds.db.Exec(fmt.Sprintf(_SQL_DELETE_SOURCES, where_sql))
 	noerror(err, "DELETE SOURCES ERROR")
@@ -728,7 +738,7 @@ func combineWhereExprs(exprs ...string) string {
 
 ////////// ADMIN COMMANDS ///////////
 
-func (ds *Ducksack) Execute(commands ...string) error {
+func (ds *BeanSack) Execute(commands ...string) error {
 	errs := []error{}
 	for _, command := range commands {
 		_, err := ds.db.Exec(command)
@@ -737,7 +747,7 @@ func (ds *Ducksack) Execute(commands ...string) error {
 	return errors.Join(errs...)
 }
 
-func (ds *Ducksack) Close() {
+func (ds *BeanSack) Close() {
 	noerror(ds.query.Close(), "QUERY CLOSE ERROR")
 	noerror(ds.db.Close(), "DB CLOSE ERROR")
 }

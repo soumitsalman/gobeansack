@@ -10,7 +10,7 @@ type AdminCommandRequest struct {
 	Commands []string `json:"commands"`
 }
 
-func createAdminCommandHandler(ds *Ducksack) gin.HandlerFunc {
+func createAdminCommandHandler(ds *BeanSack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req AdminCommandRequest
 		if err := c.ShouldBindJSON(&req); err != nil {

@@ -1,11 +1,4 @@
--- INSTALL ducklake;
--- ATTACH 'ducklake:.cache/catalog.db' AS beanlake (DATA_PATH '.cache/');
--- USE beanlake;
-
 SET preserve_insertion_order=false;
-
--- INSTALL vss;
--- LOAD vss;
 
 CREATE TABLE IF NOT EXISTS bean_cores (
     url VARCHAR NOT NULL PRIMARY KEY,
@@ -25,33 +18,27 @@ CREATE TABLE IF NOT EXISTS bean_cores (
 
 CREATE TABLE IF NOT EXISTS bean_embeddings (
     url VARCHAR NOT NULL PRIMARY KEY,
-    embedding FLOAT[%d] NOT NULL,
-    -- FOREIGN KEY (url) REFERENCES bean_cores(url)
+    embedding FLOAT[%d] NOT NULL
 );
 CREATE TABLE IF NOT EXISTS bean_gists (
     url VARCHAR NOT NULL PRIMARY KEY,
-    gist TEXT NOT NULL CHECK (gist <> ''),
-    -- FOREIGN KEY (url) REFERENCES bean_cores(url) 
+    gist TEXT NOT NULL CHECK (gist <> '') 
 );
 CREATE TABLE IF NOT EXISTS bean_categories (
     url VARCHAR NOT NULL,
-    category VARCHAR NOT NULL CHECK (category <> ''),
-    -- FOREIGN KEY (url) REFERENCES bean_cores(url) 
+    category VARCHAR NOT NULL CHECK (category <> '')
 );
 CREATE TABLE IF NOT EXISTS bean_sentiments (
     url VARCHAR NOT NULL,
-    sentiment VARCHAR NOT NULL CHECK (sentiment <> ''),
-    -- FOREIGN KEY (url) REFERENCES bean_cores(url)
+    sentiment VARCHAR NOT NULL CHECK (sentiment <> '')
 );
 CREATE TABLE IF NOT EXISTS bean_regions (
     url VARCHAR NOT NULL,
-    region VARCHAR NOT NULL CHECK (region <> ''),
-    -- FOREIGN KEY (url) REFERENCES bean_cores(url)
+    region VARCHAR NOT NULL CHECK (region <> '')
 );
 CREATE TABLE IF NOT EXISTS bean_entities (
     url VARCHAR NOT NULL,
-    entity VARCHAR NOT NULL CHECK (entity <> ''),
-    -- FOREIGN KEY (url) REFERENCES bean_cores(url)
+    entity VARCHAR NOT NULL CHECK (entity <> '')
 );
 
 CREATE TABLE IF NOT EXISTS chatters (
@@ -125,11 +112,11 @@ CROSS JOIN bean_embeddings be2
 WHERE be1.url != be2.url AND distance <= %f
 ORDER BY distance;
 
-CREATE VIEW IF NOT EXISTS bean_aggregates AS
+CREATE VIEW IF NOT EXISTS aggregated_beans_view AS
 SELECT
-    b.url, b.kind, b.title, b.title_length, b.summary, b.summary_length, b.author, b.source, b.created, b.collected,
+    b.url, b.kind, b.title, b.title_length, b.summary, b.summary_length, b.author, b.source, b.created,
     e.embedding,
-    COALESCE(g.gist, '') as gist,    
+    g.gist,    
     COALESCE(ch.collected, b.created) as updated,
     COALESCE(ch.likes, 0) as likes,
     COALESCE(ch.comments, 0) as comments,
@@ -140,10 +127,10 @@ SELECT
     r.regions,
     n.entities
 FROM bean_cores b
-LEFT JOIN bean_embeddings e ON b.url = e.url
-LEFT JOIN bean_gists g ON b.url = g.url
+INNER JOIN bean_embeddings e ON b.url = e.url
+INNER JOIN bean_gists g ON b.url = g.url
 LEFT JOIN bean_chatters ch ON b.url = ch.url
-LEFT JOIN (
+INNER JOIN (
 	SELECT url, LIST(DISTINCT category) as categories FROM bean_categories GROUP BY url
 ) as c ON b.url = c.url
 LEFT JOIN (
@@ -154,6 +141,19 @@ LEFT JOIN (
 ) as r ON b.url = r.url
 LEFT JOIN (
 	SELECT url, LIST(DISTINCT entity) as entities FROM bean_entities GROUP BY url
-) as n ON b.url = n.url
-ORDER BY b.created DESC;
-;
+) as n ON b.url = n.url;
+
+CREATE VIEW IF NOT EXISTS untagged_beans_view AS
+SELECT * EXCLUDE(e.url, g.url) FROM bean_cores b
+LEFT JOIN bean_embeddings e ON b.url = e.url
+LEFT JOIN bean_gists g ON b.url = g.url
+WHERE gist IS NULL OR embedding IS NULL;
+
+CREATE TABLE IF NOT EXISTS aggregated_beans AS 
+SELECT * FROM aggregated_beans_view;
+
+-- CREATE TABLE IF NOT EXISTS untagged_beans AS 
+-- SELECT * FROM untagged_beans_view;
+
+
+-- CREATE TABLE IF NOT EXISTS bean_clusters AS SELECT * FROM bean_clusters_view;
