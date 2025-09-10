@@ -25,25 +25,29 @@ func main() {
 	log.SetFormatter(&log.TextFormatter{
 		FullTimestamp: true,
 	})
-	log_file_path := fmt.Sprintf(".logs/beansack-%s.log", time.Now().Format("2006-01-02-15-04-05"))
-	log_file, err := os.OpenFile(log_file_path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	noerror(err, "LOG FILE ERROR")
-	log.SetOutput(log_file)
 
 	// Load configuration from environment variables
 	// Read the configuration parameters
 	godotenv.Load(".env")
 
+	// set log output to a file if specified
+	if log_dir := os.Getenv("LOGS"); log_dir != "" {
+		log_file_path := fmt.Sprintf("%s/beansack-%s.log", log_dir, time.Now().Format("2006-01-02-15-04-05"))
+		log_file, err := os.OpenFile(log_file_path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		noerror(err, "LOG FILE ERROR")
+		log.SetOutput(log_file)
+	}
+
 	// if nothing is mentioned then treat this as in memory db
 	// else if the directory is mentioned but directory does not exist then create one
-	dbpath, ok := os.LookupEnv("DATA")
-	if !ok {
-		dbpath = DEFAULT_DB_PATH
+	db_path := os.Getenv("DATA")
+	if db_path == "" {
+		db_path = DEFAULT_DB_PATH
 	} else {
-		if _, err := os.Stat(dbpath); os.IsNotExist(err) {
-			noerror(os.MkdirAll(dbpath, 0755), "CREATE DB DIR ERROR")
+		if _, err := os.Stat(db_path); os.IsNotExist(err) {
+			noerror(os.MkdirAll(db_path, 0755), "CREATE DB DIR ERROR")
 		}
-		dbpath = fmt.Sprintf("%s/%s", dbpath, DB_NAME)
+		db_path = fmt.Sprintf("%s/%s", db_path, DB_NAME)
 	}
 
 	// vector dimension
@@ -78,8 +82,8 @@ func main() {
 	init, err := os.ReadFile("./factory/init.sql")
 	noerror(err, "READ SQL ERROR")
 
-	engine := NewEngine(dbpath, string(init), dim, related_eps, throttle_max, refresh_time)
-	defer engine.ds.Close()
+	engine := NewEngine(db_path, string(init), dim, related_eps, throttle_max, refresh_time)
+	defer engine.Close()
 
 	noerror(engine.Run(":"+port), "SERVER ERROR")
 }

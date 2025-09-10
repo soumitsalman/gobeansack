@@ -28,10 +28,8 @@ RUN CGO_ENABLED=1 GOOS=linux go build -o gobeansack .
 
 COPY --from=flyio/litefs:0.5 /usr/local/bin/litefs /usr/local/bin/litefs
 
-
 # Create directory for SQLite database
 RUN mkdir -p /data
-RUN mkdir -p .logs
 
 ENV VECTOR_DIMENSIONS=384
 ENV RELATED_EPS=0.43
