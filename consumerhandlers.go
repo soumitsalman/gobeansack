@@ -14,27 +14,20 @@ const (
 	MAX_LIMIT     int64 = 300
 )
 
-var SELECT_PUBLIC_FIELDS = []string{"url", "kind", "title", "summary", "author", "source", "created", "categories", "sentiments", "regions", "entities", "updated", "likes", "comments", "shares"}
-var SELECT_GISTS = []string{"url", "created", "updated", "gist", "categories", "sentiments", "regions", "entities"}
-var SELECT_EMBEDDINGS = []string{"url", "created", "updated", "embedding"}
-var ORDER_BY_CREATED = []string{"created DESC"}
-var ORDER_BY_DISTANCE = []string{"distance ASC"}
-var ORDER_BY_CHATTERS = []string{"DATE(updated) DESC", "comments DESC", "likes DESC", "shares DESC"}
-
 type BeansQueryRequest struct {
-	// these are query params
-	Kind       string    `form:"kind"`
-	Since      time.Time `form:"created_since" time_format:"2006-01-02T15:04:05Z07:00"`
-	Categories []string  `form:"categories"`
-	Regions    []string  `form:"regions"`
-	Entities   []string  `form:"entities"`
-	Domains    []string  `form:"domains"`
-	Offset     int64     `form:"offset" json:"offset" binding:"min=0"`
-	Limit      int64     `form:"limit" json:"limit" binding:"min=0,max=300" default:"50"`
-	// these are body params
-	Embedding   Float32Array `json:"embedding,omitempty"`
-	MaxDistance float64      `json:"max_distance,omitempty" binding:"min=0,max=1"`
-	URLs        []string     `json:"urls,omitempty"`
+	URLs         []string     `json:"urls,omitempty"`
+	Kind         string       `form:"kind"`
+	Authors      []string     `form:"authors"`
+	Sources      []string     `form:"sources"`
+	CreatedSince time.Time    `form:"created_since" time_format:"2006-01-02T15:04:05Z07:00"`
+	UpdatedSince time.Time    `form:"updated_since" time_format:"2006-01-02T15:04:05Z07:00"`
+	Categories   []string     `form:"categories"`
+	Regions      []string     `form:"regions"`
+	Entities     []string     `form:"entities"`
+	Embedding    Float32Array `json:"embedding,omitempty"`
+	MaxDistance  float64      `json:"max_distance,omitempty" binding:"min=0,max=1"`
+	Offset       int64        `form:"offset" json:"offset" binding:"min=0"`
+	Limit        int64        `form:"limit" json:"limit" binding:"min=0,max=300" default:"50"`
 }
 
 func validateBeansQueryRequest(c *gin.Context) {
@@ -64,23 +57,7 @@ func validateBeansQueryRequest(c *gin.Context) {
 	c.Next()
 }
 
-func createQueryLatestBeansHandler(ds *Ducksack) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		req := c.MustGet("req").(BeansQueryRequest)
-		order_by := ORDER_BY_CREATED
-		if len(req.Embedding) > 0 {
-			order_by = ORDER_BY_DISTANCE
-		}
-		beans, err := findBeans(ds, req, nil, order_by, SELECT_PUBLIC_FIELDS)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, beans)
-	}
-}
-
-func createRelatedBeansHandler(ds *Ducksack) gin.HandlerFunc {
+func createRelatedBeansHandler(ds *Beansack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
 		if len(req.URLs) == 0 {
@@ -91,7 +68,7 @@ func createRelatedBeansHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createRegionsHandler(ds *Ducksack) gin.HandlerFunc {
+func createRegionsHandler(ds *Beansack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
 		if len(req.URLs) > 0 {
@@ -102,7 +79,7 @@ func createRegionsHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createEntitiesHandler(ds *Ducksack) gin.HandlerFunc {
+func createEntitiesHandler(ds *Beansack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
 		if len(req.URLs) > 0 {
@@ -113,7 +90,7 @@ func createEntitiesHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createCategoriesHandler(ds *Ducksack) gin.HandlerFunc {
+func createCategoriesHandler(ds *Beansack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
 		if len(req.URLs) > 0 {
@@ -124,32 +101,21 @@ func createCategoriesHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createSourcesHandler(ds *Ducksack) gin.HandlerFunc {
+func createSourcesHandler(ds *Beansack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
-		if len(req.Domains) > 0 {
-			c.JSON(http.StatusOK, ds.GetSources(req.Domains))
+		if len(req.Sources) > 0 {
+			c.JSON(http.StatusOK, ds.GetSources(req.Sources))
 		} else {
 			c.JSON(http.StatusOK, ds.DistinctSources())
 		}
 	}
 }
 
-////////// SORT BY TRENDING AND GET ALL FIELDS //////////
-
-func validateVectorSearchRequest(c *gin.Context) {
-	req := c.MustGet("req").(BeansQueryRequest)
-	if len(req.Embedding) > 0 && req.MaxDistance == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "For vector search, you must provide a max_distance"})
-		return
-	}
-	c.Next()
-}
-
-func createTrendingBeansHandler(ds *Ducksack) gin.HandlerFunc {
+func createLatestBeansHandler(db *Beansack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
-		beans, err := findBeans(ds, req, nil, ORDER_BY_CHATTERS, nil)
+		beans, err := findBeans(db, "latest", req, PUBLIC_COLUMNS)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -158,24 +124,36 @@ func createTrendingBeansHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func createTrendingBeanDigestsHandler(ds *Ducksack) gin.HandlerFunc {
+func createTrendingBeansHandler(db *Beansack) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		req := c.MustGet("req").(BeansQueryRequest)
+		beans, err := findBeans(db, "trending", req, PUBLIC_COLUMNS)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, beans)
+	}
+}
+
+func createLatestDigestsHandler(db *Beansack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
 		// pp.Println("req", req)
-		beans, err := findBeans(ds, req, nil, ORDER_BY_CHATTERS, SELECT_GISTS)
+		beans, err := findBeans(db, "latest", req, DIGEST_COLUMNS)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		pp.Println("beans", len(beans))
 		c.JSON(http.StatusOK, beans)
 	}
 }
 
-func createTrendingBeanEmbeddingsHandler(ds *Ducksack) gin.HandlerFunc {
+func createTrendingDigestsHandler(db *Beansack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
-		beans, err := findBeans(ds, req, []string{"embedding IS NOT NULL"}, ORDER_BY_CHATTERS, SELECT_EMBEDDINGS)
+		// pp.Println("req", req)
+		beans, err := findBeans(db, "trending", req, DIGEST_COLUMNS)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -184,36 +162,45 @@ func createTrendingBeanEmbeddingsHandler(ds *Ducksack) gin.HandlerFunc {
 	}
 }
 
-func findBeans(ds *Ducksack, req BeansQueryRequest, additional_where []string, order_by []string, fields []string) ([]Bean, error) {
-	if len(req.Embedding) > 0 {
-		return ds.VectorSearchBeansWithSelectFields(
+func findBeans(db *Beansack, trending_or_latest string, req BeansQueryRequest, columns string) ([]Bean, error) {
+	if trending_or_latest == "trending" {
+		return db.QueryTrendingBeans(
+			req.URLs,
+			[]string{req.Kind}, // only one kind
+			req.Authors,
+			req.Sources,
+			req.CreatedSince,
+			time.Time{}, // no collected
+			req.UpdatedSince,
+			req.Categories,
+			req.Regions,
+			req.Entities,
 			req.Embedding,
 			req.MaxDistance,
-			req.Kind,
-			req.Since,
-			req.Categories,
-			req.Regions,
-			req.Entities,
-			req.Domains,
-			additional_where,
-			order_by,
-			req.Offset,
+			nil,
+			nil,
 			req.Limit,
-			fields,
+			req.Offset,
+			[]string{columns},
 		)
 	} else {
-		return ds.QueryBeansWithSelectFields(
-			req.Kind,
-			req.Since,
+		return db.QueryLatestBeans(
+			req.URLs,
+			[]string{req.Kind}, // only one kind
+			req.Authors,
+			req.Sources,
+			req.CreatedSince,
+			time.Time{}, // no collected
 			req.Categories,
 			req.Regions,
 			req.Entities,
-			req.Domains,
-			additional_where,
-			order_by,
-			req.Offset,
+			req.Embedding,
+			req.MaxDistance,
+			nil,
+			nil,
 			req.Limit,
-			fields,
+			req.Offset,
+			[]string{columns},
 		)
 	}
 }

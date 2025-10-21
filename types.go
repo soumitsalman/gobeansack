@@ -61,6 +61,7 @@ type Bean struct {
 	Categories        StringArray  `db:"categories" json:"categories,omitempty"`
 	Sentiments        StringArray  `db:"sentiments" json:"sentiments,omitempty"`
 	Related           StringArray  `db:"related" json:"related,omitempty"`
+	ClusterId         string       `db:"cluster_id" json:"cluster_id,omitempty"`
 	Gist              string       `db:"gist" json:"gist,omitempty"`
 	Regions           StringArray  `db:"regions" json:"regions,omitempty"`
 	Entities          StringArray  `db:"entities" json:"entities,omitempty"`
@@ -72,18 +73,9 @@ type Bean struct {
 	Distance          float64      `db:"distance" json:"-"`
 }
 
-type GeneratedBean struct {
-	Bean
-	Intro       string   `db:"intro"`
-	Analysis    []string `db:"analysis"`
-	Insights    []string `db:"insights"`
-	Verdict     string   `db:"verdict"`
-	Predictions []string `db:"predictions"`
-}
-
 type Chatter struct {
 	ChatterURL  string    `db:"chatter_url" bson:"chatter_url" json:"chatter_url"`
-	BeanURL     string    `db:"bean_url" bson:"url" json:"url"`
+	BeanURL     string    `db:"url" bson:"url" json:"url"`
 	Source      string    `db:"source"`
 	Forum       string    `db:"forum" bson:"group"`
 	Collected   time.Time `db:"collected"`
@@ -92,7 +84,7 @@ type Chatter struct {
 	Subscribers int       `db:"subscribers"`
 }
 
-type ChatterAggregate struct {
+type BeanChatter struct {
 	URL         string    `db:"url"`       // url of the bean
 	Collected   time.Time `db:"collected"` // last time some chatter was collected
 	Likes       int       `db:"likes"`
@@ -101,7 +93,7 @@ type ChatterAggregate struct {
 	Shares      int       `db:"shares"`
 }
 
-type Source struct {
+type Publisher struct {
 	Name        string `db:"name" bson:"site_name" json:"site_name,omitempty"`
 	Description string `db:"description" bson:"description" json:"description,omitempty"`
 	BaseURL     string `db:"base_url" bson:"site_base_url" json:"base_url,omitempty"`
