@@ -1,4 +1,4 @@
-package main
+package beansack
 
 import (
 	"database/sql"
@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/k0kubun/pp"
 	_ "github.com/marcboeker/go-duckdb/v2"
 )
 
@@ -29,7 +28,7 @@ const (
 
 const (
 	DIGEST_COLUMNS = "url, created, gist, categories, sentiments"
-	PUBLIC_COLUMNS = `* EXCLUDE(title_length, summary_length, content_length, content, restricted_content, gist, embedding)`
+	PUBLIC_COLUMNS = `* EXCLUDE(gist, embedding)`
 )
 
 const (
@@ -51,6 +50,33 @@ ATTACH 'ducklake:%s' AS warehouse
     DATA_PATH '%s'
 );
 USE warehouse;
+
+DROP VIEW IF EXISTS latest_beans_view;
+CREATE VIEW latest_beans_view AS
+SELECT  
+	url,
+	kind,
+	title,
+	COALESCE(summary, '') AS summary,
+	COALESCE(author, '') AS author,
+	source,
+	COALESCE(image_url, '') AS image_url,
+	created,
+	embedding,
+	gist,
+	categories,
+	sentiments,
+	regions,
+	entities,
+	cluster_id,
+	cluster_size
+FROM processed_beans_view;
+
+DROP VIEW IF EXISTS trending_beans_view;
+CREATE VIEW trending_beans_view AS
+SELECT * EXCLUDE(ch.url, ch.collected), ch.collected as updated
+FROM latest_beans_view b
+INNER JOIN bean_chatters_view ch ON b.url = ch.url;
 `
 
 type Beansack struct {
@@ -69,14 +95,13 @@ func NewReadonlyBeansack(catalogdb, storagedb string) *Beansack {
 	// Open DuckDB via database/sql. The driver registers itself with the name "duckdb".
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
-		logerror(err, "db driver failed")
+		LogError(err, "db driver failed")
 		return nil
 	}
-
 	// Execute init SQL. Use Exec which can run multiple statements when supported by driver.
 	if _, err := db.Exec(init_sql); err != nil {
 		db.Close()
-		logerror(err, "db connection failed")
+		LogError(err, "db connection failed")
 		return nil
 	}
 
@@ -163,15 +188,15 @@ func whereExpr(
 
 	if len(categories) > 0 {
 		conds = append(conds, "ARRAY_HAS_ANY(categories, ?)")
-		params = append(params, categories)
+		params = append(params, StringArray(categories))
 	}
 	if len(regions) > 0 {
 		conds = append(conds, "ARRAY_HAS_ANY(regions, ?)")
-		params = append(params, regions)
+		params = append(params, StringArray(regions))
 	}
 	if len(entities) > 0 {
 		conds = append(conds, "ARRAY_HAS_ANY(entities, ?)")
-		params = append(params, entities)
+		params = append(params, StringArray(entities))
 	}
 
 	if distance > 0 {
@@ -209,26 +234,26 @@ func orderExpr(fields ...string) string {
 
 func mustIn(query string, args ...any) (string, []any) {
 	query, args, err := sqlx.In(query, args...)
-	noerror(err, "IN ERROR")
+	NoError(err, "SQL error")
 	return query, args
 }
 
 func shouldIn(query string, args ...any) (string, []any, error) {
 	query, args, err := sqlx.In(query, args...)
-	logerror(err, "IN ERROR")
+	LogError(err, "SQL error")
 	return query, args, err
 }
 
 func mustSelect[T any](db *Beansack, query string, args ...any) []T {
 	var data []T
-	noerror(db.dbx.Select(&data, query, args...), "SELECT ERROR")
+	NoError(db.dbx.Select(&data, query, args...), "SELECT error")
 	return data
 }
 
 func shouldSelect[T any](db *Beansack, query string, args ...any) ([]T, error) {
 	var data []T
 	err := db.dbx.Select(&data, query, args...)
-	logerror(err, "SELECT ERROR")
+	LogError(err, "SELECT error")
 	return data, err
 }
 
@@ -287,7 +312,7 @@ func (db *Beansack) queryBeans(
 	if len(limit_params) > 0 {
 		params = append(params, limit_params...)
 	}
-	pp.Println(sql)
+	// pp.Println(sql)
 	sql, params, err := shouldIn(sql, params...)
 	if err != nil {
 		return nil, err
@@ -381,7 +406,7 @@ func (db *Beansack) QueryLatestBeans(
 	urls []string,
 	kinds []string,
 	authors, sources []string,
-	created, collected time.Time,
+	created time.Time,
 	categories, regions, entities []string,
 	embedding []float32, distance float64,
 	where_exprs []string,
@@ -389,12 +414,13 @@ func (db *Beansack) QueryLatestBeans(
 	limit int64, offset int64,
 	columns []string,
 ) ([]Bean, error) {
+	zero_time := time.Time{}
 	return db.queryBeans(
-		PROCESSED_BEANS,
+		LATEST_BEANS,
 		urls,
 		kinds,
 		authors, sources,
-		created, collected, time.Time{},
+		created, zero_time, zero_time,
 		categories, regions, entities,
 		embedding, distance,
 		where_exprs,
@@ -408,7 +434,7 @@ func (db *Beansack) QueryTrendingBeans(
 	urls []string,
 	kinds []string,
 	authors, sources []string,
-	created, collected, updated time.Time,
+	created, updated time.Time,
 	categories, regions, entities []string,
 	embedding []float32, distance float64,
 	where_exprs []string,
@@ -421,7 +447,7 @@ func (db *Beansack) QueryTrendingBeans(
 		urls,
 		kinds,
 		authors, sources,
-		created, collected, updated,
+		created, time.Time{}, updated,
 		categories, regions, entities,
 		embedding, distance,
 		where_exprs,
@@ -440,16 +466,4 @@ func (db *Beansack) Close() error {
 		log.Printf("Database connection closed.")
 	}
 	return err
-}
-
-func noerror(err error, msg string) {
-	if err != nil {
-		log.Fatal(msg, ": ", err)
-	}
-}
-
-func logerror(err error, msg string) {
-	if err != nil {
-		log.Println(err)
-	}
 }

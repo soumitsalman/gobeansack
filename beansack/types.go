@@ -1,4 +1,4 @@
-package main
+package beansack
 
 import (
 	"database/sql/driver"
@@ -55,6 +55,7 @@ type Bean struct {
 	RestrictedContent bool         `db:"restricted_content" bson:"is_scraped" json:"is_scraped,omitempty"`
 	Author            string       `db:"author" json:"author,omitempty"`
 	Source            string       `db:"source" json:"source,omitempty"`
+	ImageUrl          string       `db:"image_url" bson:"image_url" json:"image_url,omitempty"`
 	Created           time.Time    `db:"created" bson:"created" json:"created,omitempty"`
 	Collected         time.Time    `db:"collected" bson:"collected" json:"collected,omitempty"`
 	Embedding         Float32Array `db:"embedding" json:"embedding,omitempty"`
@@ -62,6 +63,7 @@ type Bean struct {
 	Sentiments        StringArray  `db:"sentiments" json:"sentiments,omitempty"`
 	Related           StringArray  `db:"related" json:"related,omitempty"`
 	ClusterId         string       `db:"cluster_id" json:"cluster_id,omitempty"`
+	ClusterSize       int          `db:"cluster_size" json:"cluster_size,omitempty"`
 	Gist              string       `db:"gist" json:"gist,omitempty"`
 	Regions           StringArray  `db:"regions" json:"regions,omitempty"`
 	Entities          StringArray  `db:"entities" json:"entities,omitempty"`

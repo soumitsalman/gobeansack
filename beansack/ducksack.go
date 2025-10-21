@@ -1,5 +1,6 @@
-package main
+package beansack
 
+// NOTE: this is kept for legacy knowledge purposes only
 // import (
 // 	"context"
 // 	"database/sql"
