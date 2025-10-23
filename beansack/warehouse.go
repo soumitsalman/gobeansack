@@ -44,6 +44,9 @@ LOAD ducklake;
 INSTALL postgres;
 LOAD postgres;
 
+SET threads=1;
+SET memory_limit='2GB';
+
 ATTACH 'ducklake:%s' AS warehouse (DATA_PATH '%s');
 USE warehouse;
 
