@@ -44,11 +44,7 @@ LOAD ducklake;
 INSTALL postgres;
 LOAD postgres;
 
-ATTACH 'ducklake:%s' AS warehouse 
-(
-    METADATA_SCHEMA 'beansack',
-    DATA_PATH '%s'
-);
+ATTACH 'ducklake:%s' AS warehouse (DATA_PATH '%s');
 USE warehouse;
 
 DROP VIEW IF EXISTS latest_beans_view;
