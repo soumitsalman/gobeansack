@@ -27,8 +27,9 @@ const (
 )
 
 const (
-	DIGEST_COLUMNS = "url, created, gist, categories, sentiments"
-	PUBLIC_COLUMNS = `* EXCLUDE(gist, embedding)`
+	DIGEST_COLUMNS  = "url, created, gist, categories, sentiments"
+	DEFAULT_COLUMNS = `* EXCLUDE(gist, embedding)`
+	ALL_COLUMNS     = `*`
 )
 
 const (
@@ -46,7 +47,8 @@ LOAD postgres;
 SET threads=1;
 -- SET memory_limit='3GB';
 
-ATTACH 'ducklake:%s' AS warehouse (DATA_PATH '%s');
+ATTACH 'ducklake:%s' AS warehouse 
+(METADATA_SCHEMA 'beansack', DATA_PATH '%s');
 USE warehouse;
 
 DROP VIEW IF EXISTS latest_beans_view;
@@ -113,14 +115,23 @@ func NewReadonlyBeansack(catalogdb, storagedb string) (*Beansack, error) {
 // query syntax builder
 
 func selectExpr(table string, columns []string, embedding []float32) (string, []any) {
-	cols := columns
-	if len(cols) == 0 {
-		cols = []string{"*"}
+	cols := []string{ALL_COLUMNS}
+	if len(columns) > 0 {
+		copy(cols, columns)
 	}
-	if len(embedding) > 0 {
-		cols = append(cols, fmt.Sprintf("array_cosine_distance(embedding::FLOAT[%d], ?::FLOAT[%d]) AS distance", len(embedding), len(embedding)))
+	if vec_len := len(embedding); vec_len > 0 {
+		cols = append(cols, fmt.Sprintf("array_cosine_distance(embedding::FLOAT[%d], ?::FLOAT[%d]) AS distance", vec_len, vec_len))
 	}
-	expr := fmt.Sprintf("SELECT %s FROM warehouse.%s", strings.Join(cols, ", "), table)
+
+	// if table contains any non-alphanumeric character, treat it as a subquery/expr
+	var from string
+	if strings.Contains(table, " ") {
+		from = "(" + table + ")"
+	} else {
+		from = "warehouse." + table
+	}
+
+	expr := fmt.Sprintf("SELECT %s FROM %s", strings.Join(cols, ", "), from)
 	params := []any{}
 	if len(embedding) > 0 {
 		params = append(params, Float32Array(embedding))
@@ -201,8 +212,13 @@ func whereExpr(
 		conds = append(conds, "distance <= ?")
 		params = append(params, distance)
 	}
+
 	if len(exprs) > 0 {
 		conds = append(conds, exprs...)
+	}
+
+	if len(conds) == 0 {
+		return "", nil
 	}
 	return fmt.Sprintf("WHERE %s", strings.Join(conds, " AND ")), params
 }
@@ -283,34 +299,64 @@ func (db *Beansack) queryBeans(
 	limit int64, offset int64,
 	columns []string,
 ) ([]Bean, error) {
-	if len(columns) == 0 {
-		columns = []string{PUBLIC_COLUMNS}
-	}
-	select_expr, select_params := selectExpr(table, columns, embedding)
-	where_expr, where_params := whereExpr(urls, kinds, authors, sources, created, collected, updated, categories, regions, entities, embedding, distance, where_exprs)
+
+	// pseudocode:
+	// if embedding is there then it should be
+	// SELECT *, array_cosine_distance(embedding, ?) AS distance
+	// FROM (SELECT columns FROM table WHERE where_expr)
+	// WHERE distance <= ?
+	// ORDER BY distance ASC
+	// LIMIT ? OFFSET ?
+	// else
+	// SELECT columns
+	// FROM table
+	// WHERE where_expr
+	// ORDER BY order_expr
+	// LIMIT ? OFFSET ?
+
+	// build scalar select
+	select_expr, _ := selectExpr(table, columns, nil)
+	where_expr, where_params := whereExpr(urls, kinds, authors, sources, created, collected, updated, categories, regions, entities, nil, 0, where_exprs)
+
+	// overwrite it with vectors
+	var select_embedding_params []any
+	var where_distance_params []any
 	if len(embedding) > 0 {
-		order = append([]string{ORDER_BY_DISTANCE}, order...)
+		subquery_select_expr, _ := selectExpr(table, nil, nil)
+		subquery := strings.Join([]string{
+			subquery_select_expr,
+			where_expr,
+		}, " ")
+		select_expr, select_embedding_params = selectExpr(subquery, columns, embedding)
+		where_expr, where_distance_params = whereExpr(nil, nil, nil, nil, time.Time{}, time.Time{}, time.Time{}, nil, nil, nil, embedding, distance, nil)
+		order = append(order, ORDER_BY_DISTANCE)
 	}
 	order_expr := orderExpr(order...)
 	limit_expr, limit_params := limitExpr(limit, offset)
 
-	sql := strings.Join([]string{
-		select_expr,
-		where_expr,
-		order_expr,
-		limit_expr,
-	}, " ")
+	sql := strings.Join(
+		[]string{
+			select_expr,
+			where_expr,
+			order_expr,
+			limit_expr,
+		},
+		" ")
 	params := make([]any, 0, 10)
-	if len(select_params) > 0 {
-		params = append(params, select_params...)
+	if len(select_embedding_params) > 0 {
+		params = append(params, select_embedding_params...)
 	}
 	if len(where_params) > 0 {
 		params = append(params, where_params...)
 	}
+	if len(where_distance_params) > 0 {
+		params = append(params, where_distance_params...)
+	}
 	if len(limit_params) > 0 {
 		params = append(params, limit_params...)
 	}
-	// pp.Println(sql)
+
+	// pp.Println(sql, len(params))
 	sql, params, err := shouldIn(sql, params...)
 	if err != nil {
 		return nil, err

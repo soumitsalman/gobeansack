@@ -116,7 +116,7 @@ func createSourcesHandler(db *bs.Beansack) gin.HandlerFunc {
 func createLatestBeansHandler(db *bs.Beansack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
-		beans, err := findBeans(db, "latest", req, bs.PUBLIC_COLUMNS)
+		beans, err := findBeans(db, "latest", req, bs.DEFAULT_COLUMNS)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -128,7 +128,7 @@ func createLatestBeansHandler(db *bs.Beansack) gin.HandlerFunc {
 func createTrendingBeansHandler(db *bs.Beansack) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.MustGet("req").(BeansQueryRequest)
-		beans, err := findBeans(db, "trending", req, bs.PUBLIC_COLUMNS)
+		beans, err := findBeans(db, "trending", req, bs.DEFAULT_COLUMNS)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

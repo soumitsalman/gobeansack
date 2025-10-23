@@ -1,4 +1,5 @@
-SELECT url, title, created, array_cosine_distance(embedding::FLOAT[384], [
+SELECT url, created, gist, categories, sentiments, 
+    array_cosine_distance(embedding::FLOAT[384], [
             -0.058685172,
             -0.014395304,
             0.005702578,
@@ -383,4 +384,7 @@ SELECT url, title, created, array_cosine_distance(embedding::FLOAT[384], [
             -0.041363027,
             0.056174453,
             -0.022091018
-        ]::FLOAT[384]) AS distance FROM latest_beans_view ORDER BY distance ASC, created DESC LIMIT 5;
+        ]::FLOAT[384]) AS distance FROM (
+            SELECT * FROM trending_beans_view
+            WHERE kind ='blog' AND created >= NOW() - INTERVAL '7 days'
+        ) ORDER BY updated DESC LIMIT 200 OFFSET 16;
