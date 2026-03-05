@@ -1,9 +1,6 @@
 package beansack
 
 import (
-	"database/sql/driver"
-	"encoding/json"
-	"fmt"
 	"time"
 )
 
@@ -15,51 +12,52 @@ const (
 	COMMENT   = "comment"
 )
 
-type Float32Array []float32
-type StringArray []string
-
 type Bean struct {
-	URL         string       `db:"url" json:"url,omitempty"`
-	Kind        string       `db:"kind" json:"kind,omitempty"`
-	Title       string       `db:"title" json:"title,omitempty"`
-	Summary     string       `db:"summary" json:"summary,omitempty"`
-	Content     string       `db:"content" json:"content,omitempty"`
-	Author      string       `db:"author" json:"author,omitempty"`
-	Source      string       `db:"source" json:"source,omitempty"`
-	ImageUrl    string       `db:"image_url" bson:"image_url" json:"image_url,omitempty"`
-	Created     *time.Time   `db:"created" bson:"created" json:"created,omitempty"`
-	Embedding   Float32Array `db:"embedding" json:"embedding,omitempty"`
-	Gist        string       `db:"gist" json:"gist,omitempty"`
-	Categories  StringArray  `db:"categories" json:"categories,omitempty"`
-	Sentiments  StringArray  `db:"sentiments" json:"sentiments,omitempty"`
-	Regions     StringArray  `db:"regions" json:"regions,omitempty"`
-	Entities    StringArray  `db:"entities" json:"entities,omitempty"`
-	Related     StringArray  `db:"related" json:"related,omitempty"`
-	ClusterId   string       `db:"cluster_id" json:"cluster_id,omitempty"`
-	ClusterSize int          `db:"cluster_size" json:"cluster_size,omitempty"`
-	Updated     *time.Time   `db:"updated" json:"updated,omitempty"`
-	Likes       int          `db:"likes" json:"likes,omitempty"`
-	Comments    int          `db:"comments" json:"comments,omitempty"`
-	Subscribers int          `db:"subscribers" json:"subscribers,omitempty"`
-	Shares      int          `db:"shares" json:"shares,omitempty"`
-	Distance    float64      `db:"distance" json:"-"`
-	TrendScore  float64      `db:"trend_score" json:"trend_score,omitempty"`
+	URL        string    `db:"url" json:"url,omitempty"`
+	Kind       string    `db:"kind" json:"kind,omitempty"`
+	Title      string    `db:"title" json:"title,omitempty"`
+	Summary    string    `db:"summary" json:"summary,omitempty"`
+	Content    string    `db:"content" json:"content,omitempty"`
+	Author     string    `db:"author" json:"author,omitempty"`
+	Source     string    `db:"source" json:"source,omitempty"`
+	ImageUrl   string    `db:"image_url" bson:"image_url" json:"image_url,omitempty"`
+	Created    time.Time `db:"created" bson:"created" json:"created,omitempty,omitzero"`
+	Embedding  []float32 `db:"embedding" json:"embedding,omitempty"`
+	Gist       string    `db:"gist" json:"gist,omitempty"`
+	Categories []string  `db:"categories" json:"categories,omitempty"`
+	Sentiments []string  `db:"sentiments" json:"sentiments,omitempty"`
+	Regions    []string  `db:"regions" json:"regions,omitempty"`
+	Entities   []string  `db:"entities" json:"entities,omitempty"`
+}
+
+type BeanAggregate struct {
+	Bean
+	Related     []string  `db:"related" json:"related,omitempty"`
+	ClusterId   string    `db:"cluster_id" json:"cluster_id,omitempty"`
+	ClusterSize int       `db:"cluster_size" json:"cluster_size,omitempty"`
+	Updated     time.Time `db:"updated" json:"updated,omitempty,omitzero"`
+	Likes       int       `db:"likes" json:"likes,omitempty"`
+	Comments    int       `db:"comments" json:"comments,omitempty"`
+	Subscribers int       `db:"subscribers" json:"subscribers,omitempty"`
+	Shares      int       `db:"shares" json:"shares,omitempty"`
+	Distance    float64   `db:"distance" json:"-"`
+	TrendScore  float64   `db:"trend_score" json:"trend_score,omitempty"`
 }
 
 type Chatter struct {
 	ChatterURL  string    `db:"chatter_url" bson:"chatter_url" json:"chatter_url"`
-	BeanURL     string    `db:"url" bson:"url" json:"url"`
-	Source      string    `db:"source"`
-	Forum       string    `db:"forum" bson:"group"`
-	Collected   time.Time `db:"collected"`
-	Likes       int       `db:"likes"`
-	Comments    int       `db:"comments"`
-	Subscribers int       `db:"subscribers"`
+	URL         string    `db:"url" bson:"url" json:"url"`
+	Source      string    `db:"source" json:"source,omitempty"`
+	Forum       string    `db:"forum" bson:"group" json:"forum,omitempty"`
+	Collected   time.Time `db:"collected" json:"-"`
+	Likes       int       `db:"likes" json:"likes,omitempty"`
+	Comments    int       `db:"comments" json:"comments,omitempty"`
+	Subscribers int       `db:"subscribers" json:"subscribers,omitempty"`
 }
 
 type BeanChatter struct {
-	URL         string    `db:"url"`       // url of the bean
-	Collected   time.Time `db:"collected"` // last time some chatter was collected
+	URL         string    `db:"url"`                // url of the bean
+	Collected   time.Time `db:"collected" json:"-"` // last time some chatter was collected
 	Likes       int       `db:"likes"`
 	Comments    int       `db:"comments"`
 	Subscribers int       `db:"subscribers"`
@@ -74,88 +72,4 @@ type Publisher struct {
 	Favicon     string    `db:"favicon" json:"favicon,omitempty"`
 	RSSFeed     string    `db:"rss_feed" json:"-"`
 	Collected   time.Time `db:"collected" json:"-"`
-}
-
-func (vec StringArray) Value() (driver.Value, error) {
-	bytes, err := json.Marshal(vec)
-	return driver.Value(string(bytes)), err
-}
-
-func (vec *StringArray) Scan(value interface{}) error {
-	if value == nil {
-		*vec = nil
-		return nil
-	}
-
-	switch value := value.(type) {
-	case []interface{}:
-		converted := make([]string, len(value))
-		for i, val := range value {
-			converted[i] = val.(string)
-		}
-		*vec = converted
-	case []byte:
-	case string:
-		return json.Unmarshal([]byte(value), vec)
-	default:
-		return fmt.Errorf("unsupported type: %T", value)
-	}
-	return nil
-}
-
-func (vec Float32Array) Value() (driver.Value, error) {
-	if len(vec) == 0 {
-		return driver.Value(nil), fmt.Errorf("vector cannot be nil or empty")
-	}
-	bytes, err := json.Marshal(vec)
-	return driver.Value(string(bytes)), err
-}
-
-func (vec *Float32Array) Scan(value interface{}) error {
-	if value == nil {
-		*vec = nil
-		return nil
-	}
-
-	switch value := value.(type) {
-	case []interface{}:
-		converted := make([]float32, len(value))
-		for i, val := range value {
-			switch v := val.(type) {
-			case float64:
-				converted[i] = float32(v)
-			case float32:
-				converted[i] = v
-			case int:
-				converted[i] = float32(v)
-			default:
-				return fmt.Errorf("unsupported array element type: %T", val)
-			}
-		}
-		*vec = converted
-		return nil
-	case []float32:
-		*vec = value
-		return nil
-	case []float64:
-		converted := make([]float32, len(value))
-		for i, v := range value {
-			converted[i] = float32(v)
-		}
-		*vec = converted
-		return nil
-	case []int:
-		converted := make([]float32, len(value))
-		for i, val := range value {
-			converted[i] = float32(val)
-		}
-		*vec = converted
-		return nil
-	case []byte:
-		return json.Unmarshal(value, vec)
-	case string:
-		return json.Unmarshal([]byte(value), vec)
-	default:
-		return fmt.Errorf("unsupported type: %T", value)
-	}
 }

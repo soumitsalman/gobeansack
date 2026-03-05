@@ -1,6 +1,7 @@
 package beansack
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -17,12 +18,12 @@ const (
 
 var ErrNotImplemented = errors.New("method not implemented")
 
-type QueryConditions struct {
+type Condition struct {
 	Urls       []string
 	Kind       string
-	Created    *time.Time
-	Updated    *time.Time
-	Collected  *time.Time
+	Created    time.Time
+	Updated    time.Time
+	Collected  time.Time
 	Categories []string
 	Regions    []string
 	Entities   []string
@@ -33,23 +34,23 @@ type QueryConditions struct {
 	Extra      []string // CAUTION: This is a catch-all for any additional conditions. Use with care to avoid SQL injection.
 }
 
-type QueryPage struct {
+type Pagination struct {
 	Limit  int
 	Offset int
 }
 
 type Beansack interface {
-	QueryLatestBeans(conditions QueryConditions, page QueryPage, columns []string) ([]Bean, error)
-	QueryTrendingBeans(conditions QueryConditions, page QueryPage, columns []string) ([]Bean, error)
-	QueryPublishers(conditions QueryConditions, page QueryPage, columns []string) ([]Publisher, error)
-	QueryChatters(conditions QueryConditions, page QueryPage, columns []string) ([]Chatter, error)
+	QueryLatestBeans(ctx context.Context, conditions Condition, page Pagination, columns []string) ([]Bean, error)
+	QueryTrendingBeans(ctx context.Context, conditions Condition, page Pagination, columns []string) ([]BeanAggregate, error)
+	QueryPublishers(ctx context.Context, conditions Condition, page Pagination, columns []string) ([]Publisher, error)
+	QueryChatters(ctx context.Context, conditions Condition, page Pagination, columns []string) ([]Chatter, error)
 
-	DistinctCategories(page QueryPage) ([]string, error)
-	DistinctSentiments(page QueryPage) ([]string, error)
-	DistinctEntities(page QueryPage) ([]string, error)
-	DistinctRegions(page QueryPage) ([]string, error)
-	DistinctSources(page QueryPage) ([]string, error)
+	DistinctCategories(ctx context.Context, page Pagination) ([]string, error)
+	DistinctSentiments(ctx context.Context, page Pagination) ([]string, error)
+	DistinctEntities(ctx context.Context, page Pagination) ([]string, error)
+	DistinctRegions(ctx context.Context, page Pagination) ([]string, error)
+	DistinctSources(ctx context.Context, page Pagination) ([]string, error)
 
-	CountRows(table string, conditions QueryConditions) (int64, error)
+	CountRows(ctx context.Context, table string, conditions Condition) (int64, error)
 	Close()
 }

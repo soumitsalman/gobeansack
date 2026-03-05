@@ -132,7 +132,7 @@ func selectExpr(table string, columns []string, embedding []float32) (string, []
 	expr := fmt.Sprintf("SELECT %s FROM %s", strings.Join(cols, ", "), from)
 	params := []any{}
 	if len(embedding) > 0 {
-		params = append(params, Float32Array(embedding))
+		params = append(params, sqlVector(embedding))
 	}
 	return expr, params
 }
@@ -195,15 +195,15 @@ func whereExpr(
 
 	if len(categories) > 0 {
 		conds = append(conds, "ARRAY_HAS_ANY(categories, ?)")
-		params = append(params, StringArray(categories))
+		params = append(params, sqlStringArray(categories))
 	}
 	if len(regions) > 0 {
 		conds = append(conds, "ARRAY_HAS_ANY(regions, ?)")
-		params = append(params, StringArray(regions))
+		params = append(params, sqlStringArray(regions))
 	}
 	if len(entities) > 0 {
 		conds = append(conds, "ARRAY_HAS_ANY(entities, ?)")
-		params = append(params, StringArray(entities))
+		params = append(params, sqlStringArray(entities))
 	}
 
 	if distance > 0 {

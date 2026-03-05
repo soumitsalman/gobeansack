@@ -2,53 +2,42 @@ package router
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humago"
+	"github.com/danielgtaylor/huma/v2/adapters/humagin"
+	"github.com/gin-gonic/gin"
 	bs "github.com/soumitsalman/gobeansack/beansack"
 )
 
 const (
-	Name            = "Beans API & MCP"
-	Version         = "0.1"
-	Description     = "Beans is an intelligent news & blogs aggregation and search service that curates fresh content from RSS feeds using AI-powered natural language queries and filters."
-	DefaultAccuracy = 0.75
-	DefaultLimit    = 16
-	MinLimit        = 1
-	MaxLimit        = 100
-	FaviconPath     = "app/assets/images/beans.png"
+	NAME             = "Beans API & MCP"
+	VERSION          = "0.1"
+	DESCRIPTION      = "Beans is an intelligent news & blogs aggregation and search service that curates fresh content from RSS feeds using AI-powered natural language queries and filters."
+	DEFAULT_ACCURACY = 0.75
+	// DEFAULT_LIMIT    = 16
+	// MIN_LIMIT        = 1
+	// MAX_LIMIT        = 100
+	FAVICON_PATH = "https://cafecito-assets.t3.storage.dev/images/beans.png"
 )
 
-var (
-	processedItems      = []string{"gist IS NOT NULL", "embedding IS NOT NULL"}
-	unrestrictedContent = []string{"restricted_content IS NULL", "content IS NOT NULL"}
-	coreBeanFields      = []string{"url", "kind", "title", "summary", "author", "source", "image_url", "created", "categories", "sentiments", "regions", "entities"}
-	extendedBeanFields  = append(append([]string{}, coreBeanFields...), "content")
-	corePublisherFields = []string{"source", "base_url", "site_name", "description", "favicon"}
+const (
+	_PROCESSED_BEANS_CONDITIONS      = "gist IS NOT NULL AND embedding IS NOT NULL"
+	_UNRESTRICTED_CONTENT_CONDITIONS = "restricted_content IS NULL AND content IS NOT NULL"
+	_CORE_BEAN_FIELDS                = "url, kind, title, summary, author, source, image_url, created, categories, sentiments, regions, entities"
+	_EXTENDED_BEAN_FIELDS            = _CORE_BEAN_FIELDS + ", content"
+	_CORE_PUBLISHER_FIELDS           = "source, base_url, site_name, description, favicon"
 )
 
 type Embedder interface {
 	EmbedQuery(ctx context.Context, query string) ([]float32, error)
 }
 
-type RouterDeps struct {
-	DB       bs.Beansack
-	Embedder Embedder
-	APIKeys  map[string]string
-}
-
 type HealthOutput struct {
-	Body struct {
-		Status string `json:"status"`
-	}
+	Body []map[string]any
 }
 
 type TagsInput struct {
@@ -64,8 +53,8 @@ type ArticlesInput struct {
 	Q              string    `query:"q" minLength:"3" maxLength:"512"`
 	Acc            float64   `query:"acc" default:"0.75" minimum:"0" maximum:"1"`
 	Kind           string    `query:"kind" enum:"news,blog"`
-	Tags           []string  `query:"tags"`
-	Sources        []string  `query:"sources"`
+	Tags           []string  `query:"tags,explode"`
+	Sources        []string  `query:"sources,explode"`
 	PublishedSince time.Time `query:"published_since" format:"date-time"`
 	TrendingSince  time.Time `query:"trending_since" format:"date-time"`
 	WithContent    bool      `query:"with_content" default:"false"`
@@ -73,12 +62,16 @@ type ArticlesInput struct {
 	Offset         int       `query:"offset" default:"0" minimum:"0"`
 }
 
-type BeansOutput struct {
+type LatestArticlesOutput struct {
 	Body []bs.Bean
 }
 
+type TrendingArticlesOutput struct {
+	Body []bs.BeanAggregate
+}
+
 type PublishersInput struct {
-	Sources []string `query:"sources"`
+	Sources []string `query:"sources,explode"`
 	Limit   int      `query:"limit" default:"16" minimum:"1" maximum:"100"`
 	Offset  int      `query:"offset" default:"0" minimum:"0"`
 }
@@ -87,136 +80,229 @@ type PublishersOutput struct {
 	Body []bs.Publisher
 }
 
-func InitializeRoutes(deps RouterDeps) http.Handler {
-	mux := http.NewServeMux()
-	api := humago.New(mux, huma.DefaultConfig(Name, Version))
-	api.OpenAPI().Info.Description = Description
-
-	registerHealth(api)
-	registerFavicon(api)
-	registerTags(api, deps)
-	registerArticles(api, deps)
-	registerPublishers(api, deps)
-
-	return authMiddleware(deps.APIKeys, mux)
+type Configuration struct {
+	DB       bs.Beansack
+	Embedder Embedder
+	APIKeys  map[string]string
+	Queue    chan int
 }
 
-func registerHealth(api huma.API) {
-	huma.Get(api, "/health", func(ctx context.Context, _ *struct{}) (*HealthOutput, error) {
-		out := &HealthOutput{}
-		out.Body.Status = "alive"
-		return out, nil
-	})
+// health is a no-input handler used by huma.Get. the empty struct
+// parameter is required by the generic signature.
+func (r *Configuration) health(ctx context.Context, _ *struct{}) (*HealthOutput, error) {
+	out := &HealthOutput{Body: []map[string]any{{"status": "alive"}}}
+	return out, nil
 }
 
-func registerFavicon(api huma.API) {
-	huma.Get(api, "/favicon.ico", func(ctx context.Context, _ *struct{}) (*huma.StreamResponse, error) {
-		if _, err := os.Stat(FaviconPath); err != nil {
-			return nil, huma.Error404NotFound("favicon not found")
-		}
-		path := filepath.Clean(FaviconPath)
-		stream := func(ctx huma.Context) {
-			http.ServeFile(ctx, ctx.Request(), path)
-		}
-		return &huma.StreamResponse{
-			Body: stream,
-		}, nil
-	})
+// faviconHuma is a Huma handler (no input) that performs the same redirect.
+func (r *Configuration) favicon(ctx context.Context, _ *struct{}) (*struct{}, error) {
+	ginCtx := humagin.Unwrap(ctx.(huma.Context))
+	ginCtx.Redirect(http.StatusFound, FAVICON_PATH)
+	return nil, nil
 }
 
-func registerTags(api huma.API, deps RouterDeps) {
-	huma.Get(api, "/tags/categories", func(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
-		data, err := deps.DB.DistinctCategories(input.Limit, input.Offset)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to query categories", err)
-		}
-		return &StringListOutput{Body: data}, nil
-	})
-	huma.Get(api, "/tags/entities", func(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
-		data, err := deps.DB.DistinctEntities(input.Limit, input.Offset)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to query entities", err)
-		}
-		return &StringListOutput{Body: data}, nil
-	})
-	huma.Get(api, "/tags/regions", func(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
-		data, err := deps.DB.DistinctRegions(input.Limit, input.Offset)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to query regions", err)
-		}
-		return &StringListOutput{Body: data}, nil
-	})
+func (r *Configuration) getCategories(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
+	data, err := r.DB.DistinctCategories(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
+	if err != nil {
+		return nil, huma.Error500InternalServerError("failed to query categories", err)
+	}
+	return &StringListOutput{Body: data}, nil
+}
+func (r *Configuration) getEntities(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
+	data, err := r.DB.DistinctEntities(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
+	if err != nil {
+		return nil, huma.Error500InternalServerError("failed to query entities", err)
+	}
+	return &StringListOutput{Body: data}, nil
+}
+func (r *Configuration) getRegions(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
+	data, err := r.DB.DistinctRegions(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
+	if err != nil {
+		return nil, huma.Error500InternalServerError("failed to query regions", err)
+	}
+	return &StringListOutput{Body: data}, nil
 }
 
-func registerArticles(api huma.API, deps RouterDeps) {
-	huma.Get(api, "/articles/latest", func(ctx context.Context, input *ArticlesInput) (*BeansOutput, error) {
-		embedding, distance, kind, err := vectorArgs(ctx, deps.Embedder, input.Q, input.Acc, input.Kind)
-		if err != nil {
-			return nil, err
-		}
-		var published *time.Time
-		if !input.PublishedSince.IsZero() {
-			published = &input.PublishedSince
-		}
-		conditions := processedItems
-		columns := coreBeanFields
-		if input.WithContent {
-			conditions = append([]string{}, unrestrictedContent...)
-			conditions = append(conditions, processedItems...)
-			columns = extendedBeanFields
-		}
-		items, err := deps.DB.QueryLatestBeans(kind, published, nil, nil, nil, nil, input.Tags, input.Sources, embedding, distance, conditions, input.Limit, input.Offset, columns)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to query latest articles", err)
-		}
-		return &BeansOutput{Body: items}, nil
-	})
-
-	huma.Get(api, "/articles/trending", func(ctx context.Context, input *ArticlesInput) (*BeansOutput, error) {
-		embedding, distance, kind, err := vectorArgs(ctx, deps.Embedder, input.Q, input.Acc, input.Kind)
-		if err != nil {
-			return nil, err
-		}
-		var trending *time.Time
-		if !input.TrendingSince.IsZero() {
-			trending = &input.TrendingSince
-		}
-		conditions := processedItems
-		columns := coreBeanFields
-		if input.WithContent {
-			conditions = append([]string{}, unrestrictedContent...)
-			conditions = append(conditions, processedItems...)
-			columns = extendedBeanFields
-		}
-		items, err := deps.DB.QueryTrendingBeans(kind, trending, nil, nil, nil, nil, input.Tags, input.Sources, embedding, distance, conditions, input.Limit, input.Offset, columns)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to query trending articles", err)
-		}
-		return &BeansOutput{Body: items}, nil
-	})
+func (r *Configuration) getPublishers(ctx context.Context, input *PublishersInput) (*PublishersOutput, error) {
+	if len(input.Sources) == 0 {
+		return nil, huma.Error400BadRequest("sources is required")
+	}
+	items, err := r.DB.QueryPublishers(ctx, bs.Condition{Sources: input.Sources}, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, []string{_CORE_PUBLISHER_FIELDS})
+	if err != nil {
+		return nil, huma.Error500InternalServerError("failed to query publishers", err)
+	}
+	return &PublishersOutput{Body: items}, nil
 }
 
-func registerPublishers(api huma.API, deps RouterDeps) {
-	huma.Get(api, "/publishers", func(ctx context.Context, input *PublishersInput) (*PublishersOutput, error) {
-		if len(input.Sources) == 0 {
-			return nil, huma.Error400BadRequest("sources is required")
-		}
-		items, err := deps.DB.QueryPublishers(nil, nil, input.Sources, nil, input.Limit, input.Offset, corePublisherFields)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to query publishers", err)
-		}
-		return &PublishersOutput{Body: items}, nil
-	})
-
-	huma.Get(api, "/publishers/sources", func(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
-		items, err := deps.DB.DistinctPublishers(input.Limit, input.Offset)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to query publisher IDs", err)
-		}
-		return &StringListOutput{Body: items}, nil
-	})
+func (r *Configuration) getSources(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
+	items, err := r.DB.DistinctSources(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
+	if err != nil {
+		return nil, huma.Error500InternalServerError("failed to query publisher IDs", err)
+	}
+	return &StringListOutput{Body: items}, nil
 }
 
+func (r *Configuration) getLatestArticles(ctx context.Context, input *ArticlesInput) (*LatestArticlesOutput, error) {
+	conditions := prepareBeanConditions(input)
+	columns := []string{_CORE_BEAN_FIELDS}
+	if input.WithContent {
+		columns = []string{_EXTENDED_BEAN_FIELDS}
+	}
+	items, err := r.DB.QueryLatestBeans(ctx, *conditions, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, columns)
+	if err != nil {
+		return nil, huma.Error500InternalServerError("failed to query latest articles", err)
+	}
+	return &LatestArticlesOutput{Body: items}, nil
+}
+
+func (r *Configuration) getTrendingArticles(ctx context.Context, input *ArticlesInput) (*TrendingArticlesOutput, error) {
+	conditions := prepareBeanConditions(input)
+	columns := []string{_CORE_BEAN_FIELDS}
+	if input.WithContent {
+		columns = []string{_EXTENDED_BEAN_FIELDS}
+	}
+	items, err := r.DB.QueryTrendingBeans(ctx, *conditions, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, columns)
+	if err != nil {
+		return nil, huma.Error500InternalServerError("failed to query trending articles", err)
+	}
+	return &TrendingArticlesOutput{Body: items}, nil
+}
+
+func (r *Configuration) verifyAPIKey(ctx huma.Context) bool {
+	if len(r.APIKeys) == 0 {
+		return true
+	}
+	for header, expected := range r.APIKeys {
+		if strings.TrimSpace(ctx.Header(header)) == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func NewRouter(config *Configuration) *gin.Engine {
+	router := gin.Default()
+
+	// using the humachi adapter (chi-backed) so that query slices are
+	// parsed automatically – no post-processing of tags/sources is needed.
+	api := humagin.New(router, huma.DefaultConfig(NAME, VERSION))
+	api.OpenAPI().Info.Description = DESCRIPTION
+
+	huma.Get(api, "/health", config.health)
+	huma.Get(api, "/favicon.ico", config.favicon)
+
+	protected := huma.NewGroup(api)
+	protected.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
+		if !config.verifyAPIKey(ctx) {
+			huma.WriteErr(api, ctx, http.StatusUnauthorized, "Missing API Key")
+			return
+		}
+		next(ctx)
+	})
+
+	huma.Register(
+		protected,
+		huma.Operation{
+			Method:      http.MethodGet,
+			Path:        "/tags/categories",
+			OperationID: "get-tags-get-categories",
+			Summary:     "List categories",
+			Description: "Retrieves a list of unique values of articles categories/topics, such as Artificial Intelligence, Cybersecurity, Politics, Software Engineering etc.",
+		},
+		config.getCategories,
+	)
+	huma.Register(
+		api,
+		huma.Operation{
+			Method:      http.MethodGet,
+			Path:        "/tags/entities",
+			OperationID: "get-tags-get-entities",
+			Summary:     "List entities",
+			Description: "Retrieves a list of unique values of named entities (people, organizations, products) mentioned in the articles.",
+		},
+		config.getEntities,
+	)
+
+	huma.Register(
+		api,
+		huma.Operation{
+			Method:      http.MethodGet,
+			Path:        "/tags/regions",
+			OperationID: "get-tags-get-regions",
+			Summary:     "List regions",
+			Description: "Retrieves a list of unique values of geographic regions mentioned in the articles such as UK, US, Europe etc.",
+		},
+		config.getRegions,
+	)
+
+	huma.Register(
+		api,
+		huma.Operation{
+			Method:      http.MethodGet,
+			Path:        "/publishers",
+			OperationID: "get-publishers",
+			Summary:     "Get publishers' metadata",
+			Description: "Retrieves publisher metadata filtered by one or more publisher IDs.",
+		},
+		config.getPublishers,
+	)
+
+	huma.Register(
+		api,
+		huma.Operation{
+			Method:      http.MethodGet,
+			Path:        "/publishers/sources",
+			OperationID: "get-publishers-ids",
+			Summary:     "List publisher IDs",
+			Description: "Retrieves a list of unique values of publisher IDs/sources from which the articles are sourced.",
+		},
+		config.getSources,
+	)
+
+	huma.Register(
+		api,
+		huma.Operation{
+			Method:      http.MethodGet,
+			Path:        "/articles/latest",
+			OperationID: "get-latest-articles",
+			Summary:     "Search latest articles",
+			Description: "Searches for the latest articles/news/blogs. For vector search (when `q` is provided), the results are sorted by relevance. Otherwise, they are sorted by publication date in descending order (newest first).",
+		},
+		config.getLatestArticles,
+	)
+
+	huma.Register(
+		api,
+		huma.Operation{
+			Method:      http.MethodGet,
+			Path:        "/articles/trending",
+			OperationID: "get-articles-trending",
+			Summary:     "Search trending articles",
+			Description: "Searches for the trending articles/news/blogs. For vector search (when `q` is provided), the results are sorted by relevance. Otherwise, they are sorted by internal trend score (calculated from social media engagement: comments, likes, shares, last engagement etc.).",
+		},
+		config.getTrendingArticles,
+	)
+
+	return router
+}
+
+func prepareBeanConditions(input *ArticlesInput) *bs.Condition {
+	conditions := bs.Condition{
+		Kind:    input.Kind,
+		Created: input.PublishedSince,
+		Updated: input.TrendingSince,
+		Tags:    input.Tags,
+		Sources: input.Sources,
+		// TODO: add vector
+		Extra: []string{_PROCESSED_BEANS_CONDITIONS},
+	}
+	if input.WithContent {
+		conditions.Extra = append(conditions.Extra, _UNRESTRICTED_CONTENT_CONDITIONS)
+	}
+	return &conditions
+}
+
+// INPUT processing utilities
 func vectorArgs(ctx context.Context, embedder Embedder, query string, acc float64, kindStr string) ([]float32, float64, *string, error) {
 	var kind *string
 	if kindStr != "" {
@@ -238,60 +324,4 @@ func vectorArgs(ctx context.Context, embedder Embedder, query string, acc float6
 		return nil, 0, nil, huma.Error500InternalServerError("failed to embed query", err)
 	}
 	return embedding, 1 - acc, kind, nil
-}
-
-func authMiddleware(apiKeys map[string]string, next http.Handler) http.Handler {
-	if len(apiKeys) == 0 {
-		return next
-	}
-	public := map[string]bool{"/health": true, "/favicon.ico": true}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if public[r.URL.Path] {
-			next.ServeHTTP(w, r)
-			return
-		}
-		for header, value := range apiKeys {
-			if r.Header.Get(header) == value {
-				next.ServeHTTP(w, r)
-				return
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Invalid API Key"})
-	})
-}
-
-func ParseAPIKeys(raw string) map[string]string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	result := map[string]string{}
-	for _, pair := range strings.Split(raw, ";") {
-		pair = strings.TrimSpace(pair)
-		if pair == "" {
-			continue
-		}
-		parts := strings.SplitN(pair, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		header := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		if header != "" && value != "" {
-			result[header] = value
-		}
-	}
-	if len(result) == 0 {
-		return nil
-	}
-	return result
-}
-
-func RequiredEnv(name string) (string, error) {
-	v := strings.TrimSpace(os.Getenv(name))
-	if v == "" {
-		return "", fmt.Errorf("%s is required", name)
-	}
-	return v, nil
 }
