@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/k0kubun/pp"
 	datautils "github.com/soumitsalman/data-utils"
 )
 
@@ -53,7 +52,7 @@ func NewPGSack(ctx context.Context, connString string) *PGSack {
 }
 
 func (p *PGSack) QueryLatestBeans(ctx context.Context, conditions Condition, page Pagination, columns []string) ([]Bean, error) {
-	items, err := fetchBeans(ctx, p.db, BEANS, conditions, _ORDER_BY_LATEST, page, columns)
+	items, err := fetchBeans(ctx, p, BEANS, conditions, []string{_ORDER_BY_LATEST}, page, columns)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +60,7 @@ func (p *PGSack) QueryLatestBeans(ctx context.Context, conditions Condition, pag
 }
 
 func (p *PGSack) QueryTrendingBeans(ctx context.Context, conditions Condition, page Pagination, columns []string) ([]BeanAggregate, error) {
-	items, err := fetchBeans(ctx, p.db, _TRENDING_BEANS_VIEW, conditions, _ORDER_BY_TRENDING, page, columns)
+	items, err := fetchBeans(ctx, p, _TRENDING_BEANS_VIEW, conditions, []string{_ORDER_BY_TRENDING}, page, columns)
 	if err != nil {
 		return nil, err
 	}
@@ -70,10 +69,7 @@ func (p *PGSack) QueryTrendingBeans(ctx context.Context, conditions Condition, p
 
 // TODO: how to pass in text/tag/keyword based search
 func (p *PGSack) QueryPublishers(ctx context.Context, conditions Condition, page Pagination, columns []string) ([]Publisher, error) {
-	select_expr := buildPGSelect(PUBLISHERS, columns)
-	where_expr, where_params := buildPGWhere(conditions)
-	limit_offset_expr, limit_offset_params := buildPGLimitOffset(page)
-	query, args := buildPGSQL(select_expr, nil, where_expr, where_params, "", limit_offset_expr, limit_offset_params)
+	query, args := p.buildSQL(PUBLISHERS, conditions, nil, page, columns)
 	items, err := fetchAll[dataRow](ctx, p.db, query, args)
 	if err != nil {
 		return nil, err
@@ -82,10 +78,7 @@ func (p *PGSack) QueryPublishers(ctx context.Context, conditions Condition, page
 }
 
 func (p *PGSack) QueryChatters(ctx context.Context, conditions Condition, page Pagination, columns []string) ([]Chatter, error) {
-	select_expr := buildPGSelect(CHATTERS, columns)
-	where_expr, where_params := buildPGWhere(conditions)
-	limit_offset_expr, limit_offset_params := buildPGLimitOffset(page)
-	query, args := buildPGSQL(select_expr, nil, where_expr, where_params, "", limit_offset_expr, limit_offset_params)
+	query, args := p.buildSQL(CHATTERS, conditions, nil, page, columns)
 	items, err := fetchAll[dataRow](ctx, p.db, query, args)
 	if err != nil {
 		return nil, err
@@ -94,44 +87,33 @@ func (p *PGSack) QueryChatters(ctx context.Context, conditions Condition, page P
 }
 
 func (p *PGSack) DistinctCategories(ctx context.Context, page Pagination) ([]string, error) {
-	select_expr := "SELECT DISTINCT unnest(categories) AS category FROM beans WHERE categories IS NOT NULL ORDER BY category"
-	limit_offset_expr, limit_offset_params := buildPGLimitOffset(page)
-	query, args := buildPGSQL(select_expr, nil, "", nil, "", limit_offset_expr, limit_offset_params)
+	// SELECT DISTINCT unnest(categories) AS category FROM beans WHERE categories IS NOT NULL ORDER BY category
+	query, args := p.buildSQL(BEANS, Condition{Extra: []string{"categories IS NOT NULL"}}, []string{"category"}, page, []string{"DISTINCT unnest(categories) AS category"})
 	return fetchAllScalar[string](ctx, p.db, query, args)
 }
 
 func (p *PGSack) DistinctSentiments(ctx context.Context, page Pagination) ([]string, error) {
-	select_expr := "SELECT DISTINCT unnest(sentiments) AS sentiment FROM beans WHERE sentiments IS NOT NULL ORDER BY sentiment"
-	limit_offset_expr, limit_offset_params := buildPGLimitOffset(page)
-	query, args := buildPGSQL(select_expr, nil, "", nil, "", limit_offset_expr, limit_offset_params)
+	query, args := p.buildSQL(BEANS, Condition{Extra: []string{"sentiments IS NOT NULL"}}, []string{"sentiment"}, page, []string{"DISTINCT unnest(sentiments) AS sentiment"})
 	return fetchAllScalar[string](ctx, p.db, query, args)
 }
 
 func (p *PGSack) DistinctEntities(ctx context.Context, page Pagination) ([]string, error) {
-	select_expr := "SELECT DISTINCT unnest(entities) AS entity FROM beans WHERE entities IS NOT NULL ORDER BY entity"
-	limit_offset_expr, limit_offset_params := buildPGLimitOffset(page)
-	query, args := buildPGSQL(select_expr, nil, "", nil, "", limit_offset_expr, limit_offset_params)
+	query, args := p.buildSQL(BEANS, Condition{Extra: []string{"entities IS NOT NULL"}}, []string{"entity"}, page, []string{"DISTINCT unnest(entities) AS entity"})
 	return fetchAllScalar[string](ctx, p.db, query, args)
 }
 
 func (p *PGSack) DistinctRegions(ctx context.Context, page Pagination) ([]string, error) {
-	select_expr := "SELECT DISTINCT unnest(regions) AS region FROM beans WHERE regions IS NOT NULL ORDER BY region"
-	limit_offset_expr, limit_offset_params := buildPGLimitOffset(page)
-	query, args := buildPGSQL(select_expr, nil, "", nil, "", limit_offset_expr, limit_offset_params)
+	query, args := p.buildSQL(BEANS, Condition{Extra: []string{"regions IS NOT NULL"}}, []string{"region"}, page, []string{"DISTINCT unnest(regions) AS region"})
 	return fetchAllScalar[string](ctx, p.db, query, args)
 }
 
 func (p *PGSack) DistinctSources(ctx context.Context, page Pagination) ([]string, error) {
-	select_expr := "SELECT source FROM publishers ORDER BY source"
-	limit_offset_expr, limit_offset_params := buildPGLimitOffset(page)
-	query, args := buildPGSQL(select_expr, nil, "", nil, "", limit_offset_expr, limit_offset_params)
+	query, args := p.buildSQL(PUBLISHERS, Condition{}, []string{"source"}, page, []string{"source"})
 	return fetchAllScalar[string](ctx, p.db, query, args)
 }
 
 func (p *PGSack) CountRows(ctx context.Context, table string, conditions Condition) (int64, error) {
-	select_expr := buildPGSelect(table, []string{"count(*)"})
-	where_expr, where_params := buildPGWhere(conditions)
-	query, args := buildPGSQL(select_expr, nil, where_expr, where_params, "", "", nil)
+	query, args := p.buildSQL(table, conditions, nil, Pagination{}, []string{"count(*)"})
 	return fetchOneScalar[int64](ctx, p.db, query, args)
 }
 
@@ -141,61 +123,71 @@ func (p *PGSack) Close() {
 	}
 }
 
-func fetchBeans(ctx context.Context, db *pgxpool.Pool, table string, conditions Condition, order string, page Pagination, columns []string) ([]dataRow, error) {
-	// TODO: add vector similarity search conditions
-	select_expr := buildPGSelect(table, columns)
-	where_expr, where_params := buildPGWhere(conditions)
-	limit_offset_expr, limit_offset_params := buildPGLimitOffset(page)
-	query, args := buildPGSQL(select_expr, nil, where_expr, where_params, buildPGOrderBy(order), limit_offset_expr, limit_offset_params)
-	return fetchAll[dataRow](ctx, db, query, args)
+func fetchBeans(ctx context.Context, p *PGSack, table string, conditions Condition, orders []string, page Pagination, columns []string) ([]dataRow, error) {
+	query, args := p.buildSQL(table, conditions, orders, page, columns)
+	return fetchAll[dataRow](ctx, p.db, query, args)
 }
 
 // SQL query string builder utilities
 // TODO: add function for building query
-func (p *PGSack) buildSQL(table string, conditions Condition, order string, page Pagination, columns []string) (string, pgx.NamedArgs) {
-	select_expr := buildPGSelect(table, columns)
-	where_expr, where_params := buildPGWhere(conditions)
-	limit_offset_expr, limit_offset_params := buildPGLimitOffset(page)
-	return buildPGSQL(select_expr, nil, where_expr, where_params, buildPGOrderBy(order), limit_offset_expr, limit_offset_params)
-}
+func (p *PGSack) buildSQL(table string, conditions Condition, orders []string, page Pagination, columns []string) (string, pgx.NamedArgs) {
+	// where clause first - because we may need it before select
+	where_expr, where_params := p.buildSQLWhere(conditions)
 
-// TODO: merge this with buildSQL
-func buildPGSQL(select_expr string, select_params pgx.NamedArgs, where_expr string, where_params pgx.NamedArgs, order_expr string, limit_offset_expr string, limit_offset_params pgx.NamedArgs) (string, pgx.NamedArgs) {
-	expr_builder := strings.Builder{}
-	expr_builder.WriteString(select_expr)
-	if where_expr != "" {
-		expr_builder.WriteString(" ")
-		expr_builder.WriteString(where_expr)
-	}
-	if order_expr != "" {
-		expr_builder.WriteString(" ")
-		expr_builder.WriteString(order_expr)
-	}
-	if limit_offset_expr != "" {
-		expr_builder.WriteString(" ")
-		expr_builder.WriteString(limit_offset_expr)
-	}
-	merged_params := pgx.NamedArgs{}
-	for _, m := range []pgx.NamedArgs{select_params, where_params, limit_offset_params} {
-		for k, v := range m {
-			merged_params[k] = v
-		}
-	}
-	expr := expr_builder.String()
-	pp.Println(expr, merged_params)
-	return expr, merged_params
-}
-
-// NOTE: Can cause sql injection if not used carefully. Only use with trusted input or after proper sanitization.
-func buildPGSelect(table string, columns []string) string {
+	// select fields
 	fields := "*"
 	if len(columns) > 0 {
 		fields = strings.Join(columns, ", ")
 	}
-	return fmt.Sprintf("SELECT %s FROM %s", fields, table)
+
+	// either simple select or vector search with distance calculation
+	base_expr := fmt.Sprintf("SELECT %s FROM %s WHERE %s", fields, table, where_expr)
+	base_params := pgx.NamedArgs{}
+	if conditions.Embedding != nil {
+		base_expr = fmt.Sprintf(`
+			WITH vector_distances AS (
+                SELECT *, (embedding <=> @embedding::vector) AS distance
+                FROM %s 
+				WHERE %s
+            )
+            SELECT %s
+            FROM vector_distances
+            WHERE distance <= @distance`,
+			table, where_expr, fields,
+		)
+		base_params["embedding"] = conditions.Embedding
+		base_params["distance"] = conditions.Distance
+	}
+	builder := strings.Builder{}
+	builder.WriteString(base_expr)
+
+	// orders
+	if len(orders) > 0 {
+		builder.WriteString(" ")
+		builder.WriteString(p.buildPGOrderBy(orders...))
+	}
+	// pagination
+	page_expr, page_params := p.buildPGLimitOffset(page)
+	if page_expr != "" {
+		builder.WriteString(" ")
+		builder.WriteString(page_expr)
+	}
+	return builder.String(), mergeParams(base_params, where_params, page_params)
 }
 
-func buildPGWhere(conditions Condition) (string, pgx.NamedArgs) {
+func mergeParams(maps ...pgx.NamedArgs) pgx.NamedArgs {
+	merged := pgx.NamedArgs{}
+	for _, m := range maps {
+		if m != nil {
+			for k, v := range m {
+				merged[k] = v
+			}
+		}
+	}
+	return merged
+}
+
+func (p *PGSack) buildSQLWhere(conditions Condition) (string, pgx.NamedArgs) {
 	parts := make([]string, 0, 10) // preallocate for expected conditions
 	args := pgx.NamedArgs{}
 
@@ -259,14 +251,14 @@ func buildPGWhere(conditions Condition) (string, pgx.NamedArgs) {
 	return fmt.Sprintf("WHERE %s", strings.Join(parts, " AND ")), args
 }
 
-func buildPGOrderBy(order ...string) string {
+func (p *PGSack) buildPGOrderBy(order ...string) string {
 	if len(order) == 0 {
 		return ""
 	}
 	return "ORDER BY " + strings.Join(order, ", ")
 }
 
-func buildPGLimitOffset(page Pagination) (string, pgx.NamedArgs) {
+func (p *PGSack) buildPGLimitOffset(page Pagination) (string, pgx.NamedArgs) {
 	parts := make([]string, 0, 2)
 	args := pgx.NamedArgs{}
 

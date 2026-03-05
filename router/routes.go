@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humagin"
 	"github.com/gin-gonic/gin"
 	bs "github.com/soumitsalman/gobeansack/beansack"
+	"github.com/soumitsalman/gobeansack/nlp"
 )
 
 const (
@@ -31,10 +31,6 @@ const (
 	_EXTENDED_BEAN_FIELDS            = _CORE_BEAN_FIELDS + ", content"
 	_CORE_PUBLISHER_FIELDS           = "source, base_url, site_name, description, favicon"
 )
-
-type Embedder interface {
-	EmbedQuery(ctx context.Context, query string) ([]float32, error)
-}
 
 type HealthOutput struct {
 	Body []map[string]any
@@ -82,7 +78,7 @@ type PublishersOutput struct {
 
 type Configuration struct {
 	DB       bs.Beansack
-	Embedder Embedder
+	Embedder nlp.Embedder
 	APIKeys  map[string]string
 	Queue    chan int
 }
@@ -143,7 +139,7 @@ func (r *Configuration) getSources(ctx context.Context, input *TagsInput) (*Stri
 }
 
 func (r *Configuration) getLatestArticles(ctx context.Context, input *ArticlesInput) (*LatestArticlesOutput, error) {
-	conditions := prepareBeanConditions(input)
+	conditions := r.prepareBeanConditions(ctx, input)
 	columns := []string{_CORE_BEAN_FIELDS}
 	if input.WithContent {
 		columns = []string{_EXTENDED_BEAN_FIELDS}
@@ -156,7 +152,7 @@ func (r *Configuration) getLatestArticles(ctx context.Context, input *ArticlesIn
 }
 
 func (r *Configuration) getTrendingArticles(ctx context.Context, input *ArticlesInput) (*TrendingArticlesOutput, error) {
-	conditions := prepareBeanConditions(input)
+	conditions := r.prepareBeanConditions(ctx, input)
 	columns := []string{_CORE_BEAN_FIELDS}
 	if input.WithContent {
 		columns = []string{_EXTENDED_BEAN_FIELDS}
@@ -183,13 +179,15 @@ func (r *Configuration) verifyAPIKey(ctx huma.Context) bool {
 func NewRouter(config *Configuration) *gin.Engine {
 	router := gin.Default()
 
-	// using the humachi adapter (chi-backed) so that query slices are
-	// parsed automatically – no post-processing of tags/sources is needed.
+	// huma doesnt handle redirect well so directing from gin
+	router.GET("/favicon.ico", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, FAVICON_PATH)
+	})
+
 	api := humagin.New(router, huma.DefaultConfig(NAME, VERSION))
 	api.OpenAPI().Info.Description = DESCRIPTION
 
 	huma.Get(api, "/health", config.health)
-	huma.Get(api, "/favicon.ico", config.favicon)
 
 	protected := huma.NewGroup(api)
 	protected.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
@@ -212,7 +210,7 @@ func NewRouter(config *Configuration) *gin.Engine {
 		config.getCategories,
 	)
 	huma.Register(
-		api,
+		protected,
 		huma.Operation{
 			Method:      http.MethodGet,
 			Path:        "/tags/entities",
@@ -222,9 +220,8 @@ func NewRouter(config *Configuration) *gin.Engine {
 		},
 		config.getEntities,
 	)
-
 	huma.Register(
-		api,
+		protected,
 		huma.Operation{
 			Method:      http.MethodGet,
 			Path:        "/tags/regions",
@@ -236,7 +233,7 @@ func NewRouter(config *Configuration) *gin.Engine {
 	)
 
 	huma.Register(
-		api,
+		protected,
 		huma.Operation{
 			Method:      http.MethodGet,
 			Path:        "/publishers",
@@ -246,9 +243,8 @@ func NewRouter(config *Configuration) *gin.Engine {
 		},
 		config.getPublishers,
 	)
-
 	huma.Register(
-		api,
+		protected,
 		huma.Operation{
 			Method:      http.MethodGet,
 			Path:        "/publishers/sources",
@@ -260,7 +256,7 @@ func NewRouter(config *Configuration) *gin.Engine {
 	)
 
 	huma.Register(
-		api,
+		protected,
 		huma.Operation{
 			Method:      http.MethodGet,
 			Path:        "/articles/latest",
@@ -270,9 +266,8 @@ func NewRouter(config *Configuration) *gin.Engine {
 		},
 		config.getLatestArticles,
 	)
-
 	huma.Register(
-		api,
+		protected,
 		huma.Operation{
 			Method:      http.MethodGet,
 			Path:        "/articles/trending",
@@ -286,7 +281,7 @@ func NewRouter(config *Configuration) *gin.Engine {
 	return router
 }
 
-func prepareBeanConditions(input *ArticlesInput) *bs.Condition {
+func (config *Configuration) prepareBeanConditions(ctx context.Context, input *ArticlesInput) *bs.Condition {
 	conditions := bs.Condition{
 		Kind:    input.Kind,
 		Created: input.PublishedSince,
@@ -299,29 +294,9 @@ func prepareBeanConditions(input *ArticlesInput) *bs.Condition {
 	if input.WithContent {
 		conditions.Extra = append(conditions.Extra, _UNRESTRICTED_CONTENT_CONDITIONS)
 	}
+	if input.Q != "" {
+		conditions.Embedding = config.Embedder.EmbedQuery(ctx, input.Q)
+		conditions.Distance = 1 - input.Acc
+	}
 	return &conditions
-}
-
-// INPUT processing utilities
-func vectorArgs(ctx context.Context, embedder Embedder, query string, acc float64, kindStr string) ([]float32, float64, *string, error) {
-	var kind *string
-	if kindStr != "" {
-		v := strings.ToLower(kindStr)
-		if v != bs.NEWS && v != bs.BLOG {
-			return nil, 0, nil, huma.Error400BadRequest("kind must be either news or blog")
-		}
-		kind = &v
-	}
-
-	if strings.TrimSpace(query) == "" {
-		return nil, 0, kind, nil
-	}
-	if embedder == nil {
-		return nil, 0, nil, huma.Error500InternalServerError("embedder is not configured", errors.New("missing embedder"))
-	}
-	embedding, err := embedder.EmbedQuery(ctx, query)
-	if err != nil {
-		return nil, 0, nil, huma.Error500InternalServerError("failed to embed query", err)
-	}
-	return embedding, 1 - acc, kind, nil
 }

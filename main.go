@@ -8,6 +8,7 @@ import (
 	"github.com/joho/godotenv"
 	log "github.com/sirupsen/logrus"
 	bs "github.com/soumitsalman/gobeansack/beansack"
+	"github.com/soumitsalman/gobeansack/nlp"
 	r "github.com/soumitsalman/gobeansack/router"
 )
 
@@ -23,8 +24,9 @@ func main() {
 	defer db.Close()
 
 	api := r.NewRouter(&r.Configuration{
-		DB:      db,
-		APIKeys: parseAPIKeys(os.Getenv("API_KEYS")),
+		DB:       db,
+		Embedder: nlp.NewRemoteEmbedder(getEnv("EMBEDDER_BASE_URL", "", true), getEnv("EMBEDDER_API_KEY", "", false), getEnv("EMBEDDER_MODEL", "", false)),
+		APIKeys:  parseAPIKeys(os.Getenv("API_KEYS")),
 	})
 
 	port := getEnv("PORT", "8080", false)
