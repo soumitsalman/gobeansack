@@ -21,6 +21,11 @@ const (
 	FAVICON_PATH     = "https://cafecito-assets.t3.storage.dev/images/beans.png"
 )
 
+const (
+	_EMBEDDER_ERROR = "Embedder just died. Retry in a bit."
+	_DB_ERROR       = "DB just died. Retry in a bit."
+)
+
 type HealthOutput struct {
 	Body []map[string]any
 }
@@ -94,21 +99,21 @@ func (r *Configuration) favicon(ctx context.Context, _ *struct{}) (*struct{}, er
 func (r *Configuration) getCategories(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
 	data, err := r.DB.DistinctCategories(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to query categories", err)
+		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
 	}
 	return &StringListOutput{Body: data}, nil
 }
 func (r *Configuration) getEntities(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
 	data, err := r.DB.DistinctEntities(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to query entities", err)
+		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
 	}
 	return &StringListOutput{Body: data}, nil
 }
 func (r *Configuration) getRegions(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
 	data, err := r.DB.DistinctRegions(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to query regions", err)
+		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
 	}
 	return &StringListOutput{Body: data}, nil
 }
@@ -119,7 +124,7 @@ func (r *Configuration) getPublishers(ctx context.Context, input *PublishersInpu
 	}
 	items, err := r.DB.QueryPublishers(ctx, bs.Condition{Sources: input.Sources}, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, []string{bs.CORE_PUBLISHER_FIELDS})
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to query publishers", err)
+		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
 	}
 	return &PublishersOutput{Body: items}, nil
 }
@@ -127,33 +132,39 @@ func (r *Configuration) getPublishers(ctx context.Context, input *PublishersInpu
 func (r *Configuration) getSources(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
 	items, err := r.DB.DistinctSources(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to query publisher IDs", err)
+		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
 	}
 	return &StringListOutput{Body: items}, nil
 }
 
 func (r *Configuration) getLatestArticles(ctx context.Context, input *ArticlesInput) (*LatestArticlesOutput, error) {
-	conditions := r.prepareBeanConditions(ctx, input)
+	conditions, err := r.prepareBeanConditions(ctx, input)
+	if err != nil {
+		return nil, err
+	}
 	columns := []string{bs.CORE_BEAN_FIELDS}
 	if input.WithContent {
 		columns = []string{bs.K_CONTENT}
 	}
 	items, err := r.DB.QueryLatestBeans(ctx, *conditions, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, columns)
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to query latest articles", err)
+		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
 	}
 	return &LatestArticlesOutput{Body: items}, nil
 }
 
 func (r *Configuration) getTrendingArticles(ctx context.Context, input *ArticlesInput) (*TrendingArticlesOutput, error) {
-	conditions := r.prepareBeanConditions(ctx, input)
+	conditions, err := r.prepareBeanConditions(ctx, input)
+	if err != nil {
+		return nil, err
+	}
 	columns := []string{bs.CORE_BEAN_FIELDS, bs.K_TRENDSCORE}
 	if input.WithContent {
 		columns = []string{bs.K_CONTENT}
 	}
 	items, err := r.DB.QueryTrendingBeans(ctx, *conditions, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, columns)
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to query trending articles", err)
+		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
 	}
 	return &TrendingArticlesOutput{Body: items}, nil
 }
@@ -303,7 +314,7 @@ func NewRouter(config *Configuration) *gin.Engine {
 	return router
 }
 
-func (config *Configuration) prepareBeanConditions(ctx context.Context, input *ArticlesInput) *bs.Condition {
+func (config *Configuration) prepareBeanConditions(ctx context.Context, input *ArticlesInput) (*bs.Condition, error) {
 	conditions := bs.Condition{
 		Kind:    input.Kind,
 		Created: input.PublishedSince,
@@ -317,8 +328,11 @@ func (config *Configuration) prepareBeanConditions(ctx context.Context, input *A
 		conditions.Extra = append(conditions.Extra, bs.UNRESTRICTED_CONTENT_CONDITIONS)
 	}
 	if input.Q != "" {
-		conditions.Embedding = config.Embedder.EmbedQuery(ctx, input.Q)
 		conditions.Distance = 1 - input.Acc
+		conditions.Embedding = config.Embedder.EmbedQuery(ctx, input.Q)
+		if len(conditions.Embedding) == 0 {
+			return nil, huma.Error500InternalServerError(_EMBEDDER_ERROR)
+		}
 	}
-	return &conditions
+	return &conditions, nil
 }

@@ -1,40 +1,22 @@
-# Use golang bullseye as base image (Debian-based)
-FROM golang:1.26-bookworm
-
-# Install necessary dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    build-essential \
-    ca-certificates \
-    # fuse3 \
-    # sqlite3 \
-    # libsqlite3-dev \
-    libstdc++-12-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Stage 1: Builder with protobuf tools
+FROM golang:1.26-alpine AS builder
 
 # Set working directory
 WORKDIR /app
-
-# Set CGO flags
-ENV CGO_ENABLED=1
-ENV CGO_CFLAGS="-I/usr/include"
-ENV CGO_CXXFLAGS="-I/usr/include"
-ENV CGO_LDFLAGS="-L/usr/lib -L/usr/lib/x86_64-linux-gnu -lstdc++"
-
 COPY . .
-RUN go mod download
-RUN CGO_ENABLED=1 GOOS=linux go build -o beansackapi .
 
-# Create directory for SQLite database
-RUN mkdir -p /app/data
+RUN go mod download
+RUN GOOS=linux go build -o beansapi .
+
+# Stage 2: Minimal runtime image
+FROM alpine:latest
+RUN apk add --no-cache ca-certificates
+
+WORKDIR /app
+COPY --from=builder /app/beansapi .
 
 ENV PORT=8080
-ENV STORAGE_DATAPATH=/app/data
-ENV MAX_CONCURRENT_QUERIES=2
-ENV GIN_MODE=release
 
 EXPOSE 8080
 
-# Run the application as entrypoint
-ENTRYPOINT ["/app/beansackapi"]
+ENTRYPOINT ["/app/beansapi"]

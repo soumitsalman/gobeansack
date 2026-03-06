@@ -1,32 +1,32 @@
 version: "3.9"
 
 services:
-  gobeansack:
-    build: .
-    image: gobeansack:local
+  tei:
+    build:
+      context: .
+      dockerfile: TEI-Dockerfile
+    image: tei:local
+    ports:
+      - "10000:10000"
+    networks:
+      - beansack-net
+
+  beansapi:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: beans-api:local
     ports:
       - "8080:8080"
     volumes:
       - ./.beansack:/app/data
     environment:
       - PORT=8080
-      - PG_CONNECTION_STRING=postgresql://postgres:localpass@localpostgres:5432/beansackdb
-      - API_KEY=yomomma
+      - EMBEDDER_BASE_URL=tei:10000
+    env_file:
+      - .env
     depends_on:
-      - localpostgres
-    networks:
-      - beansack-net
-
-  localpostgres:
-    image: postgres:17-alpine
-    ports:
-      - "15432:5432"
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: localpass
-      POSTGRES_DB: beansackdb
-    volumes:
-      - ./.beansack/postgres:/var/lib/postgresql/data
+      - tei
     networks:
       - beansack-net
 

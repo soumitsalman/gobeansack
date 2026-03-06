@@ -1,125 +1,95 @@
 package nlp
 
-// TODO: convert this into grpc client
-
 import (
 	"context"
 	"time"
 
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
-	_TIMEOUT = 10
+	_TIMEOUT          = 10 * time.Minute
+	_DEFAULT_BASE_URL = "localhost"
 )
 
 type Embedder interface {
 	EmbedQuery(ctx context.Context, query string) []float32
 	EmbedDocuments(ctx context.Context, docs []string) [][]float32
+	Close() error
 }
 
 type RemoteEmbedder struct {
-	client openai.Client
-	model  string
+	conn   *grpc.ClientConn
+	client EmbedClient
 }
 
-func NewRemoteEmbedder(base_url, api_key, model string) *RemoteEmbedder {
-	options := make([]option.RequestOption, 0, 2)
-	if base_url != "" {
-		options = append(options, option.WithBaseURL(base_url))
+// NewRemoteEmbedder creates a new embedder that connects to Hugging Face TEI via gRPC
+// baseURL should be in format "hostname:port" (e.g., "localhost:10000")
+// model and apiKey parameters are ignored for TEI but kept for backward compatibility
+func NewRemoteEmbedder(baseURL, apiKey, model string) *RemoteEmbedder {
+	if baseURL == "" {
+		baseURL = _DEFAULT_BASE_URL
 	}
-	if api_key != "" {
-		options = append(options, option.WithAPIKey(api_key))
+
+	conn, err := grpc.NewClient(
+		baseURL,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		log.WithError(err).Fatal("failed to connect to TEI gRPC server")
 	}
-	embedder := &RemoteEmbedder{
-		client: openai.NewClient(options...),
-		model:  model,
+
+	return &RemoteEmbedder{
+		conn:   conn,
+		client: NewEmbedClient(conn),
 	}
-	return embedder
 }
 
+// EmbedQuery embeds a single query string
 func (e *RemoteEmbedder) EmbedQuery(ctx context.Context, query string) []float32 {
-	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, time.Duration(_TIMEOUT)*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, _TIMEOUT)
 	defer cancel()
 
-	resp, err := e.client.Embeddings.New(ctx, openai.EmbeddingNewParams{
-		Input: openai.EmbeddingNewParamsInputUnion{OfString: openai.String(query)},
-		Model: e.model,
+	resp, err := e.client.Embed(ctx, &EmbedRequest{
+		Inputs: query,
 	})
 	if err != nil {
-		log.Error(err)
+		log.WithError(err).Error("failed to embed query")
 		return nil
 	}
-	if len(resp.Data) == 0 || len(resp.Data[0].Embedding) == 0 {
-		log.Error("empty embedding response")
+
+	if len(resp.Embeddings) == 0 {
+		log.Error("empty embedding response from TEI")
 		return nil
 	}
-	return toFloat32Slice(resp.Data[0].Embedding)
+
+	return resp.Embeddings
 }
 
+// EmbedDocuments embeds multiple documents by calling Embed for each
+// (TEI's gRPC Embed service processes one input at a time; use EmbedStream for batching)
 func (e *RemoteEmbedder) EmbedDocuments(ctx context.Context, docs []string) [][]float32 {
-	panic("Not Implemented")
-}
-
-func toFloat32Slice(in []float64) []float32 {
-	embedding := make([]float32, len(in))
-	for i, v := range in {
-		embedding[i] = float32(v)
+	if len(docs) == 0 {
+		return nil
 	}
-	return embedding
+
+	result := make([][]float32, 0, len(docs))
+	for _, doc := range docs {
+		embedding := e.EmbedQuery(ctx, doc)
+		if embedding != nil {
+			result = append(result, embedding)
+		}
+	}
+
+	return result
 }
 
-// type openAICompatibleEmbedder struct {
-// 	baseURL string
-// 	apiKey  string
-// 	model   string
-// 	client  *http.Client
-// }
-
-// type embeddingRequest struct {
-// 	Input string `json:"input"`
-// 	Model string `json:"model"`
-// }
-
-// type embeddingResponse struct {
-// 	Data []struct {
-// 		Embedding []float32 `json:"embedding"`
-// 	} `json:"data"`
-// }
-
-// func (e *openAICompatibleEmbedder) EmbedQuery(ctx context.Context, query string) ([]float32, error) {
-// 	payload, err := json.Marshal(embeddingRequest{Input: query, Model: e.model})
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	url := strings.TrimRight(e.baseURL, "/") + "/v1/embeddings"
-// 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	req.Header.Set("Content-Type", "application/json")
-// 	if e.apiKey != "" {
-// 		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-// 	}
-
-// 	resp, err := e.client.Do(req)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer resp.Body.Close()
-// 	if resp.StatusCode >= 300 {
-// 		return nil, fmt.Errorf("embedding api returned %s", resp.Status)
-// 	}
-
-// 	out := embeddingResponse{}
-// 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-// 		return nil, err
-// 	}
-// 	if len(out.Data) == 0 || len(out.Data[0].Embedding) == 0 {
-// 		return nil, fmt.Errorf("empty embedding response")
-// 	}
-// 	return out.Data[0].Embedding, nil
-// }
+// Close closes the gRPC connection
+func (e *RemoteEmbedder) Close() error {
+	if e.conn != nil {
+		return e.conn.Close()
+	}
+	return nil
+}

@@ -1,0 +1,24 @@
+properties:
+  managedEnvironmentId: "/subscriptions/e101d87a-0960-4810-88dc-8e5ea06294ba/resourceGroups/frontends-rg/providers/Microsoft.App/managedEnvironments/cafecito-api-env"
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
+  template:
+    containers:
+      - name: main
+        image: docker.io/soumitsr/beans-api:rest-2026-Mar-06
+        env:
+          - name: EMBEDDER_BASE_URL
+            value: "localhost:10000"
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi
+      - name: embedder
+        image: docker.io/soumitsr/tei-static:latest
+        env:
+          - name: MAX_CONCURRENT_REQUESTS
+            value: "512"
+        resources:
+          cpu: 0.5
+          memory: 1.0Gi

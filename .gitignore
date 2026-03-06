@@ -6,4 +6,6 @@
 .db
 .ducklake
 .beansack
+.tools
+nlp/.proto
 

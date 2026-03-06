@@ -211,12 +211,12 @@ curl -s $COMMON $AUTH \
 ```bash
 # example running locally
 export PORT=8080
-export API_KEYS="X-Api-Key:foo"
+export API_KEYS="X-API-KEY:foo"
 export PG_CONNECTION_STRING="postgres://user:pass@localhost:5432/beans"
-export MAX_CONCURRENT_REQS=20
+export MAX_CONCURRENT_REQUESTS=512
 export EMBEDDER_BASE_URL="https://my-embedder.local"  # e.g. OpenAI or local service
 export EMBEDDER_API_KEY="secret123"
-./gobeansack
+./go-beans-api
 ```
 
 ### Deployment Notes
