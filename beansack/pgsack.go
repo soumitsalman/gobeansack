@@ -9,14 +9,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/k0kubun/pp"
 	"github.com/pgvector/pgvector-go"
 	pgxvec "github.com/pgvector/pgvector-go/pgx"
 	datautils "github.com/soumitsalman/data-utils"
 )
 
 const (
-	_TIMEOUT        = 5
+	_TIMEOUT        = 10
 	_POOL_SIZE      = 32
 	_CONN_LIFETIME  = 5
 	_CONN_IDLE_TIME = 5
@@ -40,6 +39,10 @@ func NewPGSack(ctx context.Context, connString string) *PGSack {
 	config.MaxConnIdleTime = time.Minute * _CONN_IDLE_TIME
 	config.HealthCheckPeriod = time.Minute * _CONN_LIFETIME
 	config.ConnConfig.ConnectTimeout = time.Minute * _TIMEOUT
+	if config.ConnConfig.RuntimeParams == nil {
+		config.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	config.ConnConfig.RuntimeParams["statement_timeout"] = fmt.Sprintf("%dmin", _TIMEOUT)
 	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		return pgxvec.RegisterTypes(ctx, conn)
 	}
@@ -173,9 +176,8 @@ func (p *PGSack) buildSQL(table string, conditions Condition, orders []string, p
 		builder.WriteString(" ")
 		builder.WriteString(page_expr)
 	}
-	expr, params := builder.String(), mergeParams(base_params, where_params, page_params)
-	pp.Println(expr)
-	return expr, params
+	return builder.String(), mergeParams(base_params, where_params, page_params)
+	// return expr, params
 }
 
 func mergeParams(maps ...pgx.NamedArgs) pgx.NamedArgs {

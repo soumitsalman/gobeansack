@@ -4,6 +4,7 @@ package nlp
 
 import (
 	"context"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -11,10 +12,7 @@ import (
 )
 
 const (
-	defaultPort         = "8080"
-	defaultEmbedModel   = "text-embedding-3-small"
-	defaultEmbedBaseURL = "https://api.openai.com"
-	embedTimeoutSeconds = 30
+	_TIMEOUT = 10
 )
 
 type Embedder interface {
@@ -43,6 +41,10 @@ func NewRemoteEmbedder(base_url, api_key, model string) *RemoteEmbedder {
 }
 
 func (e *RemoteEmbedder) EmbedQuery(ctx context.Context, query string) []float32 {
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, time.Duration(_TIMEOUT)*time.Minute)
+	defer cancel()
+
 	resp, err := e.client.Embeddings.New(ctx, openai.EmbeddingNewParams{
 		Input: openai.EmbeddingNewParamsInputUnion{OfString: openai.String(query)},
 		Model: e.model,

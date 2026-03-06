@@ -1,6 +1,0 @@
-{
-    "chat.tools.terminal.autoApprove": {
-        "go": true
-    },
-    "postman.settings.dotenv-detection-notification-visibility": false
-}

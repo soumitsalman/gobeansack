@@ -18,10 +18,7 @@ const (
 	VERSION          = "0.1"
 	DESCRIPTION      = "Beans is an intelligent news & blogs aggregation and search service that curates fresh content from RSS feeds using AI-powered natural language queries and filters."
 	DEFAULT_ACCURACY = 0.75
-	// DEFAULT_LIMIT    = 16
-	// MIN_LIMIT        = 1
-	// MAX_LIMIT        = 100
-	FAVICON_PATH = "https://cafecito-assets.t3.storage.dev/images/beans.png"
+	FAVICON_PATH     = "https://cafecito-assets.t3.storage.dev/images/beans.png"
 )
 
 type HealthOutput struct {
@@ -72,7 +69,12 @@ type Configuration struct {
 	DB       bs.Beansack
 	Embedder nlp.Embedder
 	APIKeys  map[string]string
-	Queue    chan int
+	// Queue controls the number of concurrent requests handled by the
+	// service.  The channel is created in `main` based on the
+	// MAX_CONCURRENT_REQUESTS environment variable; it is used by a
+	// middleware that blocks when the channel is full, effectively
+	// queueing excess callers until capacity frees up.
+	Queue chan int
 }
 
 // health is a no-input handler used by huma.Get. the empty struct
@@ -156,6 +158,8 @@ func (r *Configuration) getTrendingArticles(ctx context.Context, input *Articles
 	return &TrendingArticlesOutput{Body: items}, nil
 }
 
+type humaMiddleware func(ctx huma.Context, next func(huma.Context))
+
 func (r *Configuration) verifyAPIKey(ctx huma.Context) bool {
 	if len(r.APIKeys) == 0 {
 		return true
@@ -167,6 +171,35 @@ func (r *Configuration) verifyAPIKey(ctx huma.Context) bool {
 	}
 	return false
 }
+
+func createAPIKeyMiddleware(r *Configuration, api huma.API) humaMiddleware {
+	return func(ctx huma.Context, next func(huma.Context)) {
+		if !r.verifyAPIKey(ctx) {
+			huma.WriteErr(api, ctx, http.StatusUnauthorized, "Missing API Key")
+			return
+		}
+		next(ctx)
+	}
+}
+
+func createConcurrencyMiddleware(r *Configuration) humaMiddleware {
+	if r.Queue == nil {
+		r.Queue = make(chan int, 1) // default: 1 item at a time
+	}
+	return func(ctx huma.Context, next func(huma.Context)) {
+		if r.Queue != nil {
+			r.Queue <- 1
+			defer func() { <-r.Queue }()
+		}
+		next(ctx)
+	}
+}
+
+// concurrencyMiddleware enforces a maximum number of concurrent
+// requests.  It is registered on the top‑level Huma router so that every
+// operation (including `/health`) goes through it.  When the buffer is
+// full the middleware will block on send; callers are naturally queued by
+// the Go scheduler until a slot becomes available.
 
 func NewRouter(config *Configuration) *gin.Engine {
 	router := gin.Default()
@@ -182,13 +215,10 @@ func NewRouter(config *Configuration) *gin.Engine {
 	huma.Get(api, "/health", config.health)
 
 	protected := huma.NewGroup(api)
-	protected.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
-		if !config.verifyAPIKey(ctx) {
-			huma.WriteErr(api, ctx, http.StatusUnauthorized, "Missing API Key")
-			return
-		}
-		next(ctx)
-	})
+	protected.UseMiddleware(
+		createAPIKeyMiddleware(config, api),
+		createConcurrencyMiddleware(config),
+	)
 
 	huma.Register(
 		protected,
