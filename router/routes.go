@@ -24,14 +24,6 @@ const (
 	FAVICON_PATH = "https://cafecito-assets.t3.storage.dev/images/beans.png"
 )
 
-const (
-	_PROCESSED_BEANS_CONDITIONS      = "gist IS NOT NULL AND embedding IS NOT NULL"
-	_UNRESTRICTED_CONTENT_CONDITIONS = "restricted_content IS NULL AND content IS NOT NULL"
-	_CORE_BEAN_FIELDS                = "url, kind, title, summary, author, source, image_url, created, categories, sentiments, regions, entities"
-	_EXTENDED_BEAN_FIELDS            = _CORE_BEAN_FIELDS + ", content"
-	_CORE_PUBLISHER_FIELDS           = "source, base_url, site_name, description, favicon"
-)
-
 type HealthOutput struct {
 	Body []map[string]any
 }
@@ -123,7 +115,7 @@ func (r *Configuration) getPublishers(ctx context.Context, input *PublishersInpu
 	if len(input.Sources) == 0 {
 		return nil, huma.Error400BadRequest("sources is required")
 	}
-	items, err := r.DB.QueryPublishers(ctx, bs.Condition{Sources: input.Sources}, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, []string{_CORE_PUBLISHER_FIELDS})
+	items, err := r.DB.QueryPublishers(ctx, bs.Condition{Sources: input.Sources}, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, []string{bs.CORE_PUBLISHER_FIELDS})
 	if err != nil {
 		return nil, huma.Error500InternalServerError("failed to query publishers", err)
 	}
@@ -140,9 +132,9 @@ func (r *Configuration) getSources(ctx context.Context, input *TagsInput) (*Stri
 
 func (r *Configuration) getLatestArticles(ctx context.Context, input *ArticlesInput) (*LatestArticlesOutput, error) {
 	conditions := r.prepareBeanConditions(ctx, input)
-	columns := []string{_CORE_BEAN_FIELDS}
+	columns := []string{bs.CORE_BEAN_FIELDS}
 	if input.WithContent {
-		columns = []string{_EXTENDED_BEAN_FIELDS}
+		columns = []string{bs.K_CONTENT}
 	}
 	items, err := r.DB.QueryLatestBeans(ctx, *conditions, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, columns)
 	if err != nil {
@@ -153,9 +145,9 @@ func (r *Configuration) getLatestArticles(ctx context.Context, input *ArticlesIn
 
 func (r *Configuration) getTrendingArticles(ctx context.Context, input *ArticlesInput) (*TrendingArticlesOutput, error) {
 	conditions := r.prepareBeanConditions(ctx, input)
-	columns := []string{_CORE_BEAN_FIELDS}
+	columns := []string{bs.CORE_BEAN_FIELDS, bs.K_TRENDSCORE}
 	if input.WithContent {
-		columns = []string{_EXTENDED_BEAN_FIELDS}
+		columns = []string{bs.K_CONTENT}
 	}
 	items, err := r.DB.QueryTrendingBeans(ctx, *conditions, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, columns)
 	if err != nil {
@@ -289,10 +281,10 @@ func (config *Configuration) prepareBeanConditions(ctx context.Context, input *A
 		Tags:    input.Tags,
 		Sources: input.Sources,
 		// TODO: add vector
-		Extra: []string{_PROCESSED_BEANS_CONDITIONS},
+		Extra: []string{bs.PROCESSED_BEANS_CONDITIONS},
 	}
 	if input.WithContent {
-		conditions.Extra = append(conditions.Extra, _UNRESTRICTED_CONTENT_CONDITIONS)
+		conditions.Extra = append(conditions.Extra, bs.UNRESTRICTED_CONTENT_CONDITIONS)
 	}
 	if input.Q != "" {
 		conditions.Embedding = config.Embedder.EmbedQuery(ctx, input.Q)

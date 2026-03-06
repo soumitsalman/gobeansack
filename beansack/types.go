@@ -12,6 +12,25 @@ const (
 	COMMENT   = "comment"
 )
 
+const (
+	K_URL        = "url"
+	K_KIND       = "kind"
+	K_TITLE      = "title"
+	K_SUMMARY    = "summary"
+	K_CONTENT    = "content"
+	K_AUTHOR     = "author"
+	K_SOURCE     = "source"
+	K_IMAGE_URL  = "image_url"
+	K_CREATED    = "created"
+	K_CATEGORIES = "categories"
+	K_SENTIMENTS = "sentiments"
+	K_REGIONS    = "regions"
+	K_ENTITIES   = "entities"
+	K_GIST       = "gist"
+	K_EMBEDDING  = "embedding"
+	K_TRENDSCORE = "trend_score"
+)
+
 type Bean struct {
 	URL        string    `db:"url" json:"url,omitempty"`
 	Kind       string    `db:"kind" json:"kind,omitempty"`

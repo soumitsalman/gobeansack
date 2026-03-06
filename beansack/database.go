@@ -16,6 +16,16 @@ const (
 	FIXED_SENTIMENTS = "fixed_sentiments"
 )
 
+const (
+	CORE_BEAN_FIELDS                = "url, kind, title, summary, author, source, image_url, created, categories, sentiments, regions, entities"
+	CORE_PUBLISHER_FIELDS           = "source, base_url, site_name, description, favicon"
+	PROCESSED_BEANS_CONDITIONS      = "gist IS NOT NULL AND embedding IS NOT NULL"
+	UNRESTRICTED_CONTENT_CONDITIONS = "restricted_content IS NULL AND content IS NOT NULL"
+	ORDER_BY_LATEST                 = "created DESC"
+	ORDER_BY_TRENDING               = "trend_score DESC"
+	ORDER_BY_DISTANCE               = "distance ASC"
+)
+
 var ErrNotImplemented = errors.New("method not implemented")
 
 type Condition struct {

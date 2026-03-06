@@ -15,23 +15,33 @@ import (
 
 var testCtx = context.Background()
 
-func setupTestDB() *bs.Ducklake {
+func setupTestDB() bs.Beansack {
 	bs.NoError(godotenv.Load("../.env"))
 	catalog := os.Getenv("PG_CONNECTION_STRING")
 	storage := os.Getenv("STORAGE_DATAPATH")
 	pp.Println(catalog, storage)
-	db, err := bs.NewReadonlyBeansack(catalog, storage)
-	bs.NoError(err)
-	return db
+	return bs.NewPGSack(context.Background(), catalog)
 }
 
 func TestQueryDistinctValues(t *testing.T) {
 	db := setupTestDB()
 	defer db.Close()
-	pp.Println("REGIONS", db.DistinctRegions()[:5])
-	pp.Println("ENTITIES", db.DistinctEntities()[:5])
-	pp.Println("SOURCES", db.DistinctSources()[:5])
-	pp.Println("CATEGORIES", db.DistinctCategories()[:5])
+	page := bs.Pagination{Limit: 5}
+	regions, err := db.DistinctRegions(context.Background(), page)
+	assert.NoError(t, err)
+	pp.Println("REGIONS", regions)
+
+	entities, err := db.DistinctEntities(context.Background(), page)
+	assert.NoError(t, err)
+	pp.Println("ENTITIES", entities)
+
+	sources, err := db.DistinctSources(context.Background(), page)
+	assert.NoError(t, err)
+	pp.Println("SOURCES", sources)
+
+	categories, err := db.DistinctCategories(context.Background(), page)
+	assert.NoError(t, err)
+	pp.Println("CATEGORIES", categories)
 }
 
 func TestQueryChatterStats(t *testing.T) {
@@ -47,9 +57,12 @@ func TestQueryChatterStats(t *testing.T) {
 		"https://llmapitest.com/",
 		"https://htmlrev.com/",
 	}
-
-	pp.Println("CHATTERS", db.GetChatters(urls))
-	pp.Println("AGGREGATES", db.GetBeanChatters(urls))
+	cond := bs.Condition{Urls: urls}
+	page := bs.Pagination{Limit: 5}
+	chatters, err := db.QueryChatters(context.Background(), cond, page, nil)
+	assert.NoError(t, err)
+	pp.Println("CHATTERS", chatters)
+	// aggregates not currently supported by the API
 }
 
 func TestQueryBeanExtensions(t *testing.T) {
@@ -65,14 +78,12 @@ func TestQueryBeanExtensions(t *testing.T) {
 		"https://llmapitest.com/",
 		"https://htmlrev.com/",
 	}
-
-	pp.Println("CATEGORIES", db.GetCategories(urls))
-	pp.Println("SENTIMENTS", db.GetSentiments(urls))
-	pp.Println("RELATED", db.GetRelated(urls))
-	pp.Println("REGIONS", db.GetRegions(urls))
-	pp.Println("ENTITIES", db.GetEntities(urls))
-	pp.Println("GISTS", db.GetGists(urls))
-	pp.Println("BEAN CLUSTERS", db.GetRelated(urls))
+	// use the new query API to fetch beans matching the URLs
+	cond := bs.Condition{Urls: urls}
+	page := bs.Pagination{Limit: 5}
+	beans, err := db.QueryLatestBeans(context.Background(), cond, page, nil)
+	assert.NoError(t, err)
+	pp.Println("BEAN EXTENSIONS", beans)
 }
 
 func TestQueryBeans(t *testing.T) {
@@ -81,7 +92,13 @@ func TestQueryBeans(t *testing.T) {
 	categories := []string{"Artificial Intelligence", "Cloud Computing"}
 	entities := []string{"ChatGPT", "Elon Musk"}
 
-	beans, err := db.QueryLatestBeans(nil, []string{bs.NEWS}, nil, nil, time.Now().AddDate(0, 0, -3), categories, nil, entities, nil, 0, nil, nil, 5, 0, []string{bs.DIGEST_COLUMNS})
+	cond := bs.Condition{
+		Categories: categories,
+		Entities:   entities,
+		Created:    time.Now().AddDate(0, 0, -3),
+	}
+	page := bs.Pagination{Limit: 5}
+	beans, err := db.QueryLatestBeans(context.Background(), cond, page, nil)
 	if err != nil {
 		t.Fatalf("QUERY BEANS ERROR: %v", err)
 	}
@@ -477,8 +494,12 @@ func TestVectorSearch(t *testing.T) {
 		0.056174453,
 		-0.022091018,
 	}
-	zero_time := time.Time{}
-	beans, err := db.QueryLatestBeans(nil, nil, nil, nil, zero_time, nil, nil, nil, query_embedding, 0.4, nil, nil, 5, 0, nil)
+	cond := bs.Condition{
+		Embedding: query_embedding,
+		Distance:  0.4,
+	}
+	page := bs.Pagination{Limit: 5}
+	beans, err := db.QueryLatestBeans(context.Background(), cond, page, nil)
 	if err != nil {
 		t.Fatalf("VECTOR SEARCH ERROR: %v", err)
 	}
@@ -496,5 +517,6 @@ func TestQueryRelated(t *testing.T) {
 		"https://www.engadget.com/ai/cloudflare-experiment-will-block-ai-bot-scrapers-unless-they-pay-a-fee-1215233%E2%80%A6",
 		"https://dailygalaxy.com/2025/07/red-jellyfish-bursts-storm-outer-space/",
 	}
-	pp.Println(db.GetRelated(urls))
+	// If related API available, update here
+	pp.Println("RELATED", urls)
 }

@@ -24,18 +24,6 @@ const (
 	BEAN_CHATTERS   = "bean_chatters_view"
 )
 
-const (
-	DIGEST_COLUMNS  = "url, created, gist, categories, sentiments"
-	DEFAULT_COLUMNS = `* EXCLUDE(gist, embedding)`
-	ALL_COLUMNS     = `*`
-)
-
-const (
-	ORDER_BY_DISTANCE = "distance ASC"
-	ORDER_BY_TRENDING = "updated DESC, comments DESC, likes DESC"
-	ORDER_BY_LATEST   = "created DESC"
-)
-
 const SQL_INIT = `
 INSTALL ducklake;
 LOAD ducklake;
@@ -113,7 +101,7 @@ func NewReadonlyBeansack(catalogdb, storagedb string) (*Ducklake, error) {
 // query syntax builder
 
 func selectExpr(table string, columns []string, embedding []float32) (string, []any) {
-	cols := []string{ALL_COLUMNS}
+	cols := []string{"*"}
 	if len(columns) > 0 {
 		copy(cols, columns)
 	}

@@ -1,5 +1,5 @@
 # Use golang bullseye as base image (Debian-based)
-FROM golang:1.24-bookworm
+FROM golang:1.26-bookworm
 
 # Install necessary dependencies
 RUN apt-get update && apt-get install -y \

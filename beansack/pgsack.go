@@ -9,6 +9,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/k0kubun/pp"
+	"github.com/pgvector/pgvector-go"
+	pgxvec "github.com/pgvector/pgvector-go/pgx"
 	datautils "github.com/soumitsalman/data-utils"
 )
 
@@ -17,12 +20,6 @@ const (
 	_POOL_SIZE      = 32
 	_CONN_LIFETIME  = 5
 	_CONN_IDLE_TIME = 5
-)
-
-const (
-	_ORDER_BY_LATEST   = "created DESC"
-	_ORDER_BY_TRENDING = "trend_score DESC"
-	_ORDER_BY_DISTANCE = "distance ASC"
 )
 
 const (
@@ -43,6 +40,9 @@ func NewPGSack(ctx context.Context, connString string) *PGSack {
 	config.MaxConnIdleTime = time.Minute * _CONN_IDLE_TIME
 	config.HealthCheckPeriod = time.Minute * _CONN_LIFETIME
 	config.ConnConfig.ConnectTimeout = time.Minute * _TIMEOUT
+	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		return pgxvec.RegisterTypes(ctx, conn)
+	}
 
 	db, err := pgxpool.NewWithConfig(ctx, config)
 	NoError(err)
@@ -52,7 +52,7 @@ func NewPGSack(ctx context.Context, connString string) *PGSack {
 }
 
 func (p *PGSack) QueryLatestBeans(ctx context.Context, conditions Condition, page Pagination, columns []string) ([]Bean, error) {
-	items, err := fetchBeans(ctx, p, BEANS, conditions, []string{_ORDER_BY_LATEST}, page, columns)
+	items, err := fetchBeans(ctx, p, BEANS, conditions, []string{ORDER_BY_LATEST}, page, columns)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (p *PGSack) QueryLatestBeans(ctx context.Context, conditions Condition, pag
 }
 
 func (p *PGSack) QueryTrendingBeans(ctx context.Context, conditions Condition, page Pagination, columns []string) ([]BeanAggregate, error) {
-	items, err := fetchBeans(ctx, p, _TRENDING_BEANS_VIEW, conditions, []string{_ORDER_BY_TRENDING}, page, columns)
+	items, err := fetchBeans(ctx, p, _TRENDING_BEANS_VIEW, conditions, []string{ORDER_BY_TRENDING}, page, columns)
 	if err != nil {
 		return nil, err
 	}
@@ -141,22 +141,23 @@ func (p *PGSack) buildSQL(table string, conditions Condition, orders []string, p
 	}
 
 	// either simple select or vector search with distance calculation
-	base_expr := fmt.Sprintf("SELECT %s FROM %s WHERE %s", fields, table, where_expr)
+	base_expr := fmt.Sprintf("SELECT %s FROM %s %s", fields, table, where_expr)
 	base_params := pgx.NamedArgs{}
 	if conditions.Embedding != nil {
 		base_expr = fmt.Sprintf(`
 			WITH vector_distances AS (
                 SELECT *, (embedding <=> @embedding::vector) AS distance
                 FROM %s 
-				WHERE %s
+				%s
             )
             SELECT %s
             FROM vector_distances
             WHERE distance <= @distance`,
 			table, where_expr, fields,
 		)
-		base_params["embedding"] = conditions.Embedding
+		base_params["embedding"] = pgvector.NewVector(conditions.Embedding)
 		base_params["distance"] = conditions.Distance
+		orders = append([]string{ORDER_BY_DISTANCE}, orders...)
 	}
 	builder := strings.Builder{}
 	builder.WriteString(base_expr)
@@ -172,7 +173,9 @@ func (p *PGSack) buildSQL(table string, conditions Condition, orders []string, p
 		builder.WriteString(" ")
 		builder.WriteString(page_expr)
 	}
-	return builder.String(), mergeParams(base_params, where_params, page_params)
+	expr, params := builder.String(), mergeParams(base_params, where_params, page_params)
+	pp.Println(expr)
+	return expr, params
 }
 
 func mergeParams(maps ...pgx.NamedArgs) pgx.NamedArgs {
@@ -319,39 +322,39 @@ func fetchAllScalar[T any](ctx context.Context, db *pgxpool.Pool, query string, 
 // PGX marshalling and unmarshalling for custom types
 
 type dataRow struct {
-	URL         sql.NullString `db:"url"`
-	Kind        sql.NullString `db:"kind"`
-	Title       sql.NullString `db:"title"`
-	Summary     sql.NullString `db:"summary"`
-	Content     sql.NullString `db:"content"`
-	Author      sql.NullString `db:"author"`
-	Source      sql.NullString `db:"source"`
-	ImageUrl    sql.NullString `db:"image_url"`
-	Created     sql.NullTime   `db:"created"`
-	Embedding   []float32      `db:"embedding"`
-	Gist        sql.NullString `db:"gist"`
-	Categories  []string       `db:"categories"`
-	Sentiments  []string       `db:"sentiments"`
-	Regions     []string       `db:"regions"`
-	Entities    []string       `db:"entities"`
-	Related     []string       `db:"related"`
-	ClusterId   sql.NullString `db:"cluster_id"`
-	ClusterSize int            `db:"cluster_size"`
-	Updated     sql.NullTime   `db:"updated"`
-	Likes       int            `db:"likes"`
-	Comments    int            `db:"comments"`
-	Subscribers int            `db:"subscribers"`
-	Shares      int            `db:"shares"`
-	Distance    float64        `db:"distance"`
-	TrendScore  float64        `db:"trend_score"`
-	ChatterURL  sql.NullString `db:"chatter_url"`
-	Forum       sql.NullString `db:"forum"`
-	Collected   sql.NullTime   `db:"collected"`
-	BaseURL     sql.NullString `db:"base_url"`
-	SiteName    sql.NullString `db:"site_name"`
-	Description sql.NullString `db:"description"`
-	Favicon     sql.NullString `db:"favicon"`
-	RSSFeed     sql.NullString `db:"rss_feed"`
+	URL         sql.NullString  `db:"url"`
+	Kind        sql.NullString  `db:"kind"`
+	Title       sql.NullString  `db:"title"`
+	Summary     sql.NullString  `db:"summary"`
+	Content     sql.NullString  `db:"content"`
+	Author      sql.NullString  `db:"author"`
+	Source      sql.NullString  `db:"source"`
+	ImageUrl    sql.NullString  `db:"image_url"`
+	Created     sql.NullTime    `db:"created"`
+	Embedding   pgvector.Vector `db:"embedding"`
+	Gist        sql.NullString  `db:"gist"`
+	Categories  []string        `db:"categories"`
+	Sentiments  []string        `db:"sentiments"`
+	Regions     []string        `db:"regions"`
+	Entities    []string        `db:"entities"`
+	Related     []string        `db:"related"`
+	ClusterId   sql.NullString  `db:"cluster_id"`
+	ClusterSize int             `db:"cluster_size"`
+	Updated     sql.NullTime    `db:"updated"`
+	Likes       int             `db:"likes"`
+	Comments    int             `db:"comments"`
+	Subscribers int             `db:"subscribers"`
+	Shares      int             `db:"shares"`
+	Distance    float64         `db:"distance"`
+	TrendScore  float64         `db:"trend_score"`
+	ChatterURL  sql.NullString  `db:"chatter_url"`
+	Forum       sql.NullString  `db:"forum"`
+	Collected   sql.NullTime    `db:"collected"`
+	BaseURL     sql.NullString  `db:"base_url"`
+	SiteName    sql.NullString  `db:"site_name"`
+	Description sql.NullString  `db:"description"`
+	Favicon     sql.NullString  `db:"favicon"`
+	RSSFeed     sql.NullString  `db:"rss_feed"`
 }
 
 // Conversion methods from dataRow to public types
@@ -366,7 +369,7 @@ func (r *dataRow) toBean() Bean {
 		Source:     nullStringToString(r.Source),
 		ImageUrl:   nullStringToString(r.ImageUrl),
 		Created:    nullTimeToTime(r.Created),
-		Embedding:  r.Embedding,
+		Embedding:  r.Embedding.Slice(),
 		Gist:       nullStringToString(r.Gist),
 		Categories: r.Categories,
 		Sentiments: r.Sentiments,
