@@ -1,0 +1,390 @@
+definitions:
+  beansack.Bean:
+    description: Bean is the primary content model returned by article endpoints.
+      Each Bean represents a news or blog article and includes metadata such as the
+      `url`, `kind`, `source`, `title`, `summary` and optional full `content`, `author`,
+      publish `created` date, and derived LLM fields (embedding vectors, `gist` highlights,
+      `entities`, `regions`, `categories`, and `sentiments`).
+    properties:
+      author:
+        type: string
+      categories:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      created:
+        format: date-time
+        type: string
+      entities:
+        items:
+          type: string
+        type: array
+      image_url:
+        type: string
+      kind:
+        type: string
+      regions:
+        items:
+          type: string
+        type: array
+      sentiments:
+        items:
+          type: string
+        type: array
+      source:
+        type: string
+      summary:
+        type: string
+      title:
+        type: string
+      url:
+        type: string
+    type: object
+  beansack.Publisher:
+    description: 'Publisher contains identifying and descriptive information about
+      a publisher or content source: canonical `source` id, `base_url`, optional `site_name`,
+      human-friendly `description`, `favicon` URL, and optional `rss_feed`. This model
+      is used by publisher endpoints to return metadata for rendering or filtering.'
+    properties:
+      base_url:
+        type: string
+      description:
+        type: string
+      favicon:
+        type: string
+      site_name:
+        type: string
+      source:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: Beans is an intelligent news & blogs aggregation and search service
+    that curates fresh content from RSS feeds using AI-powered natural language queries
+    and filters.
+  title: Beans API & MCP
+  version: "0.1"
+paths:
+  /articles/latest:
+    get:
+      consumes:
+      - application/json
+      description: Searches for the latest articles/news/blogs. For vector search
+        (when `q` is provided), results are sorted by relevance; otherwise results
+        are sorted by publication date (newest first).
+      parameters:
+      - description: search query (min length 3, max length 512)
+        in: query
+        name: q
+        type: string
+      - description: accuracy (0-1) used as cosine similarity threshold; higher values
+          return fewer, more similar results
+        in: query
+        name: acc
+        type: number
+      - description: kind filter (news, blog, etc.)
+        in: query
+        name: kind
+        type: string
+      - collectionFormat: multi
+        description: tags (categories, regions, entities) to filter by
+        in: query
+        items:
+          type: string
+        name: tags
+        type: array
+      - collectionFormat: multi
+        description: sources/publisher ids to filter by
+        in: query
+        items:
+          type: string
+        name: sources
+        type: array
+      - description: published since (YYYY-MM-DD)
+        format: date
+        in: query
+        name: published_since
+        type: string
+      - description: include content
+        in: query
+        name: with_content
+        type: boolean
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      - description: offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/beansack.Bean'
+            type: array
+        "400":
+          description: error message
+          schema:
+            type: string
+        "500":
+          description: error message
+          schema:
+            type: string
+      summary: Get latest articles
+      tags:
+      - Articles
+  /articles/trending:
+    get:
+      consumes:
+      - application/json
+      description: Searches for trending articles/news/blogs. For vector search (when
+        `q` is provided), results are sorted by relevance; otherwise they are sorted
+        by an internal trend score computed from social engagement metrics (comments,
+        likes, shares, last engagement, etc.).
+      parameters:
+      - description: search query (min length 3, max length 512)
+        in: query
+        name: q
+        type: string
+      - description: accuracy (0-1) used as cosine similarity threshold; higher values
+          return fewer, more similar results
+        in: query
+        name: acc
+        type: number
+      - description: kind filter (news, blog, etc.)
+        in: query
+        name: kind
+        type: string
+      - collectionFormat: multi
+        description: tags (categories, regions, entities) to filter by
+        in: query
+        items:
+          type: string
+        name: tags
+        type: array
+      - collectionFormat: multi
+        description: sources/publisher ids to filter by
+        in: query
+        items:
+          type: string
+        name: sources
+        type: array
+      - description: trending since (YYYY-MM-DD)
+        format: date
+        in: query
+        name: trending_since
+        type: string
+      - description: include content
+        in: query
+        name: with_content
+        type: boolean
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      - description: offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/beansack.Bean'
+            type: array
+        "400":
+          description: error message
+          schema:
+            type: string
+        "500":
+          description: error message
+          schema:
+            type: string
+      summary: Get trending articles
+      tags:
+      - Articles
+  /health:
+    get:
+      description: Returns service health status
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - Health
+  /publishers:
+    get:
+      description: Retrieves publisher metadata filtered by one or more publisher
+        IDs.
+      parameters:
+      - collectionFormat: multi
+        description: sources/publisher ids to include
+        in: query
+        items:
+          type: string
+        name: sources
+        required: true
+        type: array
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      - description: offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/beansack.Publisher'
+            type: array
+        "400":
+          description: error message
+          schema:
+            type: string
+        "500":
+          description: error message
+          schema:
+            type: string
+      summary: Query publishers
+      tags:
+      - Publishers
+  /publishers/sources:
+    get:
+      description: Retrieves a list of unique publisher IDs (paginated) from which
+        articles are sourced.
+      parameters:
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      - description: offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "500":
+          description: error message
+          schema:
+            type: string
+      summary: List sources
+      tags:
+      - Publishers
+  /tags/categories:
+    get:
+      description: 'Retrieves a list of unique values of article categories/topics
+        (paginated), for example: Artificial Intelligence, Cybersecurity, Politics,
+        Software Engineering, etc.'
+      parameters:
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      - description: offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "500":
+          description: error message
+          schema:
+            type: string
+      summary: List categories
+      tags:
+      - Tags
+  /tags/entities:
+    get:
+      description: Retrieves a list of unique named entities (paginated), such as
+        people, organizations, and products mentioned in articles.
+      parameters:
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      - description: offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "500":
+          description: error message
+          schema:
+            type: string
+      summary: List entities
+      tags:
+      - Tags
+  /tags/regions:
+    get:
+      description: Retrieves a list of unique geographic regions (paginated) mentioned
+        in articles, e.g., UK, US, Europe.
+      parameters:
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      - description: offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "500":
+          description: error message
+          schema:
+            type: string
+      summary: List regions
+      tags:
+      - Tags
+schemes:
+- https
+swagger: "2.0"

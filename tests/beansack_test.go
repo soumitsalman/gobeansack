@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	bs "github.com/soumitsalman/gobeansack/beansack"
+	bs "github.com/soumitsalman/beansapi/beansack"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/k0kubun/pp"

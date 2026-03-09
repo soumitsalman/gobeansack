@@ -1,24 +1,31 @@
+// @title Beans API & MCP
+// @version 0.1
+// @description Beans is an intelligent news & blogs aggregation and search service that curates fresh content from RSS feeds using AI-powered natural language queries and filters.
+// @schemes https
 package router
 
 import (
-	"context"
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humagin"
 	"github.com/gin-gonic/gin"
-	bs "github.com/soumitsalman/gobeansack/beansack"
-	"github.com/soumitsalman/gobeansack/nlp"
+	"github.com/rs/zerolog"
+
+	bs "github.com/soumitsalman/beansapi/beansack"
+	"github.com/soumitsalman/beansapi/nlp"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 const (
-	NAME             = "Beans API & MCP"
-	VERSION          = "0.1"
-	DESCRIPTION      = "Beans is an intelligent news & blogs aggregation and search service that curates fresh content from RSS feeds using AI-powered natural language queries and filters."
-	DEFAULT_ACCURACY = 0.75
-	FAVICON_PATH     = "https://cafecito-assets.t3.storage.dev/images/beans.png"
+	DEFAULT_ACCURACY    = 0.75
+	DEFAULT_LIMIT       = 16
+	MAX_LIMIT           = 128
+	FAVICON_PATH        = "./images/beans.png"
+	DEFAULT_CONCURRENCY = 512
 )
 
 const (
@@ -26,313 +33,373 @@ const (
 	_DB_ERROR       = "DB just died. Retry in a bit."
 )
 
-type HealthOutput struct {
-	Body []map[string]any
+type PaginationInput struct {
+	Limit  int `form:"limit,default=16" binding:"min=1,max=128"`
+	Offset int `form:"offset" binding:"min=0"`
 }
 
+// PaginationInput describes common pagination query params
+// Description: Common pagination parameters used by list endpoints.
 type TagsInput struct {
-	Offset int `query:"offset" default:"0" minimum:"0"`
-	Limit  int `query:"limit" default:"16" minimum:"1" maximum:"100"`
+	PaginationInput
 }
 
-type StringListOutput struct {
-	Body []string
-}
-
-type ArticlesInput struct {
-	Q              string    `query:"q" minLength:"3" maxLength:"512"`
-	Acc            float64   `query:"acc" default:"0.75" minimum:"0" maximum:"1"`
-	Kind           string    `query:"kind" enum:"news,blog"`
-	Tags           []string  `query:"tags,explode"`
-	Sources        []string  `query:"sources,explode"`
-	PublishedSince time.Time `query:"published_since" format:"date-time"`
-	TrendingSince  time.Time `query:"trending_since" format:"date-time"`
-	WithContent    bool      `query:"with_content" default:"false"`
-	Limit          int       `query:"limit" default:"16" minimum:"1" maximum:"100"`
-	Offset         int       `query:"offset" default:"0" minimum:"0"`
-}
-
-type LatestArticlesOutput struct {
-	Body []bs.Bean
-}
-
-type TrendingArticlesOutput struct {
-	Body []bs.BeanAggregate
-}
-
+// TagsInput describes parameters for tag queries
+// Description: Query for tag-like resources (categories, entities, regions).
 type PublishersInput struct {
-	Sources []string `query:"sources,explode"`
-	Limit   int      `query:"limit" default:"16" minimum:"1" maximum:"100"`
-	Offset  int      `query:"offset" default:"0" minimum:"0"`
+	Sources []string `form:"sources"`
+	PaginationInput
 }
 
-type PublishersOutput struct {
-	Body []bs.Publisher
+// PublishersInput describes parameters for publisher queries
+// Description: Query parameters used to filter publishers by source(s).
+type ArticlesInput struct {
+	Q              string    `form:"q" binding:"max=512"`
+	Acc            float64   `form:"acc,default=0.75" binding:"min=0,max=1"`
+	Kind           string    `form:"kind"`
+	Tags           []string  `form:"tags" collection_format:"multi"`
+	Sources        []string  `form:"sources" collection_format:"multi"`
+	PublishedSince time.Time `form:"published_since" time_format:"2006-01-02" swaggertype:"string" format:"date"`
+	TrendingSince  time.Time `form:"trending_since" time_format:"2006-01-02" swaggertype:"string" format:"date"`
+	WithContent    bool      `form:"with_content,default=false"`
+	PaginationInput
 }
 
 type Configuration struct {
 	DB       bs.Beansack
 	Embedder nlp.Embedder
 	APIKeys  map[string]string
-	// Queue controls the number of concurrent requests handled by the
-	// service.  The channel is created in `main` based on the
-	// MAX_CONCURRENT_REQUESTS environment variable; it is used by a
-	// middleware that blocks when the channel is full, effectively
-	// queueing excess callers until capacity frees up.
-	Queue chan int
+	queue    chan int
 }
 
-// health is a no-input handler used by huma.Get. the empty struct
-// parameter is required by the generic signature.
-func (r *Configuration) health(ctx context.Context, _ *struct{}) (*HealthOutput, error) {
-	out := &HealthOutput{Body: []map[string]any{{"status": "alive"}}}
-	return out, nil
+// health
+func (r *Configuration) health(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "alive"})
 }
 
-// faviconHuma is a Huma handler (no input) that performs the same redirect.
-func (r *Configuration) favicon(ctx context.Context, _ *struct{}) (*struct{}, error) {
-	ginCtx := humagin.Unwrap(ctx.(huma.Context))
-	ginCtx.Redirect(http.StatusFound, FAVICON_PATH)
-	return nil, nil
+// health godoc
+// @Summary Health check
+// @Description Returns service health status
+// @Tags Health
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Router /health [get]
+func validateTagsParams(c *gin.Context) {
+	var input TagsInput
+	if err := c.ShouldBindQuery(&input); err != nil {
+		c.AbortWithError(http.StatusInternalServerError, err)
+		return
+	}
+	c.Set("req_params", input)
+	c.Set("req_page", bs.Pagination{Limit: input.Limit, Offset: input.Offset})
+	c.Next()
 }
 
-func (r *Configuration) getCategories(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
-	data, err := r.DB.DistinctCategories(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
-	if err != nil {
-		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
-	}
-	return &StringListOutput{Body: data}, nil
-}
-func (r *Configuration) getEntities(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
-	data, err := r.DB.DistinctEntities(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
-	if err != nil {
-		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
-	}
-	return &StringListOutput{Body: data}, nil
-}
-func (r *Configuration) getRegions(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
-	data, err := r.DB.DistinctRegions(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
-	if err != nil {
-		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
-	}
-	return &StringListOutput{Body: data}, nil
+// getCategories godoc
+// @Summary List categories
+// @Description Retrieves a list of unique values of article categories/topics (paginated), for example: Artificial Intelligence, Cybersecurity, Politics, Software Engineering, etc.
+// @Tags Tags
+// @Produce json
+// @Param limit query int false "limit"
+// @Param offset query int false "offset"
+// @Success 200 {array} string
+// @Failure 500 {string} string "error message"
+// @Router /tags/categories [get]
+func (r *Configuration) getCategories(c *gin.Context) {
+	page := c.MustGet("req_page").(bs.Pagination)
+	data, err := r.DB.DistinctCategories(c.Request.Context(), page)
+	returnResponse(c, data, err)
 }
 
-func (r *Configuration) getPublishers(ctx context.Context, input *PublishersInput) (*PublishersOutput, error) {
-	if len(input.Sources) == 0 {
-		return nil, huma.Error400BadRequest("sources is required")
-	}
-	items, err := r.DB.QueryPublishers(ctx, bs.Condition{Sources: input.Sources}, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, []string{bs.CORE_PUBLISHER_FIELDS})
-	if err != nil {
-		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
-	}
-	return &PublishersOutput{Body: items}, nil
+// getEntities godoc
+// @Summary List entities
+// @Description Retrieves a list of unique named entities (paginated), such as people, organizations, and products mentioned in articles.
+// @Tags Tags
+// @Produce json
+// @Param limit query int false "limit"
+// @Param offset query int false "offset"
+// @Success 200 {array} string
+// @Failure 500 {string} string "error message"
+// @Router /tags/entities [get]
+func (r *Configuration) getEntities(c *gin.Context) {
+	page := c.MustGet("req_page").(bs.Pagination)
+	data, err := r.DB.DistinctEntities(c.Request.Context(), page)
+	returnResponse(c, data, err)
 }
 
-func (r *Configuration) getSources(ctx context.Context, input *TagsInput) (*StringListOutput, error) {
-	items, err := r.DB.DistinctSources(ctx, bs.Pagination{Limit: input.Limit, Offset: input.Offset})
-	if err != nil {
-		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
-	}
-	return &StringListOutput{Body: items}, nil
+// getRegions godoc
+// @Summary List regions
+// @Description Retrieves a list of unique geographic regions (paginated) mentioned in articles, e.g., UK, US, Europe.
+// @Tags Tags
+// @Produce json
+// @Param limit query int false "limit"
+// @Param offset query int false "offset"
+// @Success 200 {array} string
+// @Failure 500 {string} string "error message"
+// @Router /tags/regions [get]
+func (r *Configuration) getRegions(c *gin.Context) {
+	page := c.MustGet("req_page").(bs.Pagination)
+	data, err := r.DB.DistinctRegions(c.Request.Context(), page)
+	returnResponse(c, data, err)
 }
 
-func (r *Configuration) getLatestArticles(ctx context.Context, input *ArticlesInput) (*LatestArticlesOutput, error) {
-	conditions, err := r.prepareBeanConditions(ctx, input)
-	if err != nil {
-		return nil, err
+func validatePublishersParams(c *gin.Context) {
+	var input PublishersInput
+	if err := c.ShouldBindQuery(&input); err != nil {
+		c.AbortWithError(http.StatusBadRequest, err)
+		return
 	}
-	columns := []string{bs.CORE_BEAN_FIELDS}
-	if input.WithContent {
-		columns = []string{bs.K_CONTENT}
-	}
-	items, err := r.DB.QueryLatestBeans(ctx, *conditions, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, columns)
-	if err != nil {
-		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
-	}
-	return &LatestArticlesOutput{Body: items}, nil
+	c.Set("req_params", input)
+	c.Set("req_conditions", bs.Condition{Sources: input.Sources})
+	c.Set("req_page", bs.Pagination{Limit: input.Limit, Offset: input.Offset})
+	c.Next()
 }
 
-func (r *Configuration) getTrendingArticles(ctx context.Context, input *ArticlesInput) (*TrendingArticlesOutput, error) {
-	conditions, err := r.prepareBeanConditions(ctx, input)
-	if err != nil {
-		return nil, err
-	}
-	columns := []string{bs.CORE_BEAN_FIELDS, bs.K_TRENDSCORE}
-	if input.WithContent {
-		columns = []string{bs.K_CONTENT}
-	}
-	items, err := r.DB.QueryTrendingBeans(ctx, *conditions, bs.Pagination{Limit: input.Limit, Offset: input.Offset}, columns)
-	if err != nil {
-		return nil, huma.Error500InternalServerError(_DB_ERROR, err)
-	}
-	return &TrendingArticlesOutput{Body: items}, nil
+// getSources godoc
+// @Summary List sources
+// @Description Retrieves a list of unique publisher IDs (paginated) from which articles are sourced.
+// @Tags Publishers
+// @Produce json
+// @Param limit query int false "limit"
+// @Param offset query int false "offset"
+// @Success 200 {array} string
+// @Failure 500 {string} string "error message"
+// @Router /publishers/sources [get]
+func (r *Configuration) getSources(c *gin.Context) {
+	page := c.MustGet("req_page").(bs.Pagination)
+	items, err := r.DB.DistinctSources(c.Request.Context(), page)
+	returnResponse(c, items, err)
 }
 
-type humaMiddleware func(ctx huma.Context, next func(huma.Context))
-
-func (r *Configuration) verifyAPIKey(ctx huma.Context) bool {
-	if len(r.APIKeys) == 0 {
-		return true
+// getPublishers godoc
+// @Summary Query publishers
+// @Description Retrieves publisher metadata filtered by one or more publisher IDs.
+// @Tags Publishers
+// @Produce json
+// @Param sources query []string true "sources/publisher ids to include" collectionFormat(multi)
+// @Param limit query int false "limit"
+// @Param offset query int false "offset"
+// @Success 200 {array} beansack.Publisher
+// @Failure 400 {string} string "error message"
+// @Failure 500 {string} string "error message"
+// @Router /publishers [get]
+func (r *Configuration) getPublishers(c *gin.Context) {
+	conditions := c.MustGet("req_conditions").(bs.Condition)
+	page := c.MustGet("req_page").(bs.Pagination)
+	if len(conditions.Sources) == 0 {
+		c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("source parameter required"))
+		return
 	}
-	for header, expected := range r.APIKeys {
-		if strings.TrimSpace(ctx.Header(header)) == expected {
-			return true
-		}
-	}
-	return false
+	items, err := r.DB.QueryPublishers(c.Request.Context(), conditions, page, []string{bs.CORE_PUBLISHER_FIELDS})
+	returnResponse(c, items, err)
 }
 
-func createAPIKeyMiddleware(r *Configuration, api huma.API) humaMiddleware {
-	return func(ctx huma.Context, next func(huma.Context)) {
-		if !r.verifyAPIKey(ctx) {
-			huma.WriteErr(api, ctx, http.StatusUnauthorized, "Missing API Key")
-			return
-		}
-		next(ctx)
+func (config *Configuration) validateArticlesParams(c *gin.Context) {
+	var input ArticlesInput
+	if err := c.ShouldBindQuery(&input); err != nil {
+		c.AbortWithError(http.StatusBadRequest, err)
+		return
 	}
-}
-
-func createConcurrencyMiddleware(r *Configuration) humaMiddleware {
-	if r.Queue == nil {
-		r.Queue = make(chan int, 1) // default: 1 item at a time
-	}
-	return func(ctx huma.Context, next func(huma.Context)) {
-		if r.Queue != nil {
-			r.Queue <- 1
-			defer func() { <-r.Queue }()
-		}
-		next(ctx)
-	}
-}
-
-// concurrencyMiddleware enforces a maximum number of concurrent
-// requests.  It is registered on the top‑level Huma router so that every
-// operation (including `/health`) goes through it.  When the buffer is
-// full the middleware will block on send; callers are naturally queued by
-// the Go scheduler until a slot becomes available.
-
-func NewRouter(config *Configuration) *gin.Engine {
-	router := gin.Default()
-
-	// huma doesnt handle redirect well so directing from gin
-	router.GET("/favicon.ico", func(c *gin.Context) {
-		c.Redirect(http.StatusFound, FAVICON_PATH)
-	})
-
-	api := humagin.New(router, huma.DefaultConfig(NAME, VERSION))
-	api.OpenAPI().Info.Description = DESCRIPTION
-
-	huma.Get(api, "/health", config.health)
-
-	protected := huma.NewGroup(api)
-	protected.UseMiddleware(
-		createAPIKeyMiddleware(config, api),
-		createConcurrencyMiddleware(config),
-	)
-
-	huma.Register(
-		protected,
-		huma.Operation{
-			Method:      http.MethodGet,
-			Path:        "/tags/categories",
-			OperationID: "get-tags-get-categories",
-			Summary:     "List categories",
-			Description: "Retrieves a list of unique values of articles categories/topics, such as Artificial Intelligence, Cybersecurity, Politics, Software Engineering etc.",
-		},
-		config.getCategories,
-	)
-	huma.Register(
-		protected,
-		huma.Operation{
-			Method:      http.MethodGet,
-			Path:        "/tags/entities",
-			OperationID: "get-tags-get-entities",
-			Summary:     "List entities",
-			Description: "Retrieves a list of unique values of named entities (people, organizations, products) mentioned in the articles.",
-		},
-		config.getEntities,
-	)
-	huma.Register(
-		protected,
-		huma.Operation{
-			Method:      http.MethodGet,
-			Path:        "/tags/regions",
-			OperationID: "get-tags-get-regions",
-			Summary:     "List regions",
-			Description: "Retrieves a list of unique values of geographic regions mentioned in the articles such as UK, US, Europe etc.",
-		},
-		config.getRegions,
-	)
-
-	huma.Register(
-		protected,
-		huma.Operation{
-			Method:      http.MethodGet,
-			Path:        "/publishers",
-			OperationID: "get-publishers",
-			Summary:     "Get publishers' metadata",
-			Description: "Retrieves publisher metadata filtered by one or more publisher IDs.",
-		},
-		config.getPublishers,
-	)
-	huma.Register(
-		protected,
-		huma.Operation{
-			Method:      http.MethodGet,
-			Path:        "/publishers/sources",
-			OperationID: "get-publishers-ids",
-			Summary:     "List publisher IDs",
-			Description: "Retrieves a list of unique values of publisher IDs/sources from which the articles are sourced.",
-		},
-		config.getSources,
-	)
-
-	huma.Register(
-		protected,
-		huma.Operation{
-			Method:      http.MethodGet,
-			Path:        "/articles/latest",
-			OperationID: "get-latest-articles",
-			Summary:     "Search latest articles",
-			Description: "Searches for the latest articles/news/blogs. For vector search (when `q` is provided), the results are sorted by relevance. Otherwise, they are sorted by publication date in descending order (newest first).",
-		},
-		config.getLatestArticles,
-	)
-	huma.Register(
-		protected,
-		huma.Operation{
-			Method:      http.MethodGet,
-			Path:        "/articles/trending",
-			OperationID: "get-articles-trending",
-			Summary:     "Search trending articles",
-			Description: "Searches for the trending articles/news/blogs. For vector search (when `q` is provided), the results are sorted by relevance. Otherwise, they are sorted by internal trend score (calculated from social media engagement: comments, likes, shares, last engagement etc.).",
-		},
-		config.getTrendingArticles,
-	)
-
-	return router
-}
-
-func (config *Configuration) prepareBeanConditions(ctx context.Context, input *ArticlesInput) (*bs.Condition, error) {
 	conditions := bs.Condition{
 		Kind:    input.Kind,
 		Created: input.PublishedSince,
 		Updated: input.TrendingSince,
 		Tags:    input.Tags,
 		Sources: input.Sources,
-		// TODO: add vector
-		Extra: []string{bs.PROCESSED_BEANS_CONDITIONS},
+		Extra:   []string{bs.PROCESSED_BEANS_CONDITIONS},
+	}
+	if conditions.Created.IsZero() {
+		conditions.Created = time.Now().AddDate(0, 0, -7) // default to last 7 days
+	}
+	if conditions.Updated.IsZero() {
+		conditions.Updated = time.Now().AddDate(0, 0, -7) // default to last 7 days
 	}
 	if input.WithContent {
 		conditions.Extra = append(conditions.Extra, bs.UNRESTRICTED_CONTENT_CONDITIONS)
 	}
 	if input.Q != "" {
 		conditions.Distance = 1 - input.Acc
-		conditions.Embedding = config.Embedder.EmbedQuery(ctx, input.Q)
+		conditions.Embedding = config.Embedder.EmbedQuery(c, input.Q)
 		if len(conditions.Embedding) == 0 {
-			return nil, huma.Error500InternalServerError(_EMBEDDER_ERROR)
+			c.AbortWithError(http.StatusInternalServerError, fmt.Errorf(_EMBEDDER_ERROR))
+			return
 		}
 	}
-	return &conditions, nil
+	columns := []string{bs.CORE_BEAN_FIELDS}
+	if input.WithContent {
+		columns = []string{bs.K_CONTENT}
+	}
+	c.Set("req_params", input)
+	c.Set("req_conditions", conditions)
+	c.Set("req_page", bs.Pagination{Limit: input.Limit, Offset: input.Offset})
+	c.Set("req_columns", columns)
+	c.Next()
+}
+
+// getLatestArticles godoc
+// @Summary Get latest articles
+// @Description Searches for the latest articles/news/blogs. For vector search (when `q` is provided), results are sorted by relevance; otherwise results are sorted by publication date (newest first).
+// @Tags Articles
+// @Accept json
+// @Produce json
+// @Param q query string false "search query (min length 3, max length 512)"
+// @Param acc query number false "accuracy (0-1) used as cosine similarity threshold; higher values return fewer, more similar results"
+// @Param kind query string false "kind filter (news, blog, etc.)"
+// @Param tags query []string false "tags (categories, regions, entities) to filter by" collectionFormat(multi)
+// @Param sources query []string false "sources/publisher ids to filter by" collectionFormat(multi)
+// @Param published_since query string false "published since (YYYY-MM-DD)" format(date)
+// @Param with_content query bool false "include content"
+// @Param limit query int false "limit"
+// @Param offset query int false "offset"
+// @Success 200 {array} beansack.Bean
+// @Failure 400 {string} string "error message"
+// @Failure 500 {string} string "error message"
+// @Router /articles/latest [get]
+func (r *Configuration) getLatestArticles(c *gin.Context) {
+	conditions := c.MustGet("req_conditions").(bs.Condition)
+	page := c.MustGet("req_page").(bs.Pagination)
+	columns := c.MustGet("req_columns").([]string)
+	conditions.Updated = time.Time{} // ignore trending filter for latest endpoint
+	items, err := r.DB.QueryLatestBeans(c.Request.Context(), conditions, page, columns)
+	returnResponse(c, items, err)
+}
+
+// getTrendingArticles godoc
+// @Summary Get trending articles
+// @Description Searches for trending articles/news/blogs. For vector search (when `q` is provided), results are sorted by relevance; otherwise they are sorted by an internal trend score computed from social engagement metrics (comments, likes, shares, last engagement, etc.).
+// @Tags Articles
+// @Accept json
+// @Produce json
+// @Param q query string false "search query (min length 3, max length 512)"
+// @Param acc query number false "accuracy (0-1) used as cosine similarity threshold; higher values return fewer, more similar results"
+// @Param kind query string false "kind filter (news, blog, etc.)"
+// @Param tags query []string false "tags (categories, regions, entities) to filter by" collectionFormat(multi)
+// @Param sources query []string false "sources/publisher ids to filter by" collectionFormat(multi)
+// @Param trending_since query string false "trending since (YYYY-MM-DD)" format(date)
+// @Param with_content query bool false "include content"
+// @Param limit query int false "limit"
+// @Param offset query int false "offset"
+// @Success 200 {array} beansack.Bean
+// @Failure 400 {string} string "error message"
+// @Failure 500 {string} string "error message"
+// @Router /articles/trending [get]
+func (r *Configuration) getTrendingArticles(c *gin.Context) {
+	conditions := c.MustGet("req_conditions").(bs.Condition)
+	page := c.MustGet("req_page").(bs.Pagination)
+	columns := c.MustGet("req_columns").([]string)
+	conditions.Created = time.Time{} // ignore published filter for trending endpoint
+	items, err := r.DB.QueryTrendingBeans(c.Request.Context(), conditions, page, columns)
+	returnResponse(c, items, err)
+}
+
+func NewRouter(db bs.Beansack, embedder nlp.Embedder, api_keys map[string]string, max_concurrent_requests int) *gin.Engine {
+	if max_concurrent_requests <= 0 {
+		max_concurrent_requests = DEFAULT_CONCURRENCY // default to 100 if not set or invalid
+	}
+	config := &Configuration{
+		DB:       db,
+		Embedder: embedder,
+		APIKeys:  api_keys,
+		queue:    make(chan int, max_concurrent_requests),
+	}
+
+	router := gin.New()
+	// JSON access logs and recovery using zerolog
+	router.Use(createRequestLogger(), gin.Recovery())
+
+	// Swagger / OpenAPI endpoints
+	// NOTE: run `swag init` to generate docs (package `docs`) before using the UI.
+	// Serve Swagger UI and point it at the generated spec in assets/docs
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	router.GET("/health", config.health)
+	router.StaticFile("favicon.ico", FAVICON_PATH)
+
+	// protected group
+	protected := router.Group("/")
+	protected.Use(config.apiKeyMiddleware, config.concurrencyMiddleware)
+
+	tags := protected.Group("/tags", validateTagsParams)
+	{
+		tags.GET("/categories", config.getCategories)
+		tags.GET("/entities", config.getEntities)
+		tags.GET("/regions", config.getRegions)
+	}
+	publishers := protected.Group("/publishers", validatePublishersParams)
+	{
+		publishers.GET("", config.getPublishers)
+		publishers.GET("/sources", config.getSources)
+	}
+	articles := protected.Group("/articles", config.validateArticlesParams)
+	{
+		articles.GET("/latest", config.getLatestArticles)
+		articles.GET("/trending", config.getTrendingArticles)
+	}
+	return router
+}
+
+// Middleware
+func (r *Configuration) apiKeyMiddleware(c *gin.Context) {
+	if len(r.APIKeys) == 0 {
+		c.Next()
+		return
+	}
+	for header, expected := range r.APIKeys {
+		if strings.TrimSpace(c.GetHeader(header)) == expected {
+			c.Next()
+			return
+		}
+	}
+	c.AbortWithError(http.StatusUnauthorized, fmt.Errorf("Missing API Key"))
+}
+
+func (r *Configuration) concurrencyMiddleware(c *gin.Context) {
+	if r.queue != nil {
+		r.queue <- 1
+		defer func() { <-r.queue }()
+	}
+	c.Next()
+}
+
+// requestLogger logs request path, query parameters, status and latency in JSON via zerolog
+func createRequestLogger() gin.HandlerFunc {
+	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
+
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+
+		status := c.Writer.Status()
+
+		var evt *zerolog.Event
+		if len(c.Errors) > 0 || status >= 500 {
+			evt = log.Error()
+		} else if status >= 400 {
+			evt = log.Warn()
+		} else {
+			evt = log.Info()
+		}
+		evt.Str("method", c.Request.Method).
+			Str("path", c.Request.URL.Path).
+			Interface("query", c.Request.URL.Query()).
+			Int("status", status).
+			Dur("latency", time.Since(start))
+
+		if len(c.Errors) > 0 {
+			evt.Str("error", c.Errors.String())
+		}
+		evt.Msg("incoming")
+	}
+}
+
+func returnResponse[T any](c *gin.Context, items []T, err error) {
+	if err != nil {
+		c.AbortWithError(http.StatusInternalServerError, fmt.Errorf(_DB_ERROR))
+		return
+	}
+	if len(items) == 0 {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	c.JSON(http.StatusOK, items)
 }

@@ -1,0 +1,556 @@
+{
+    "schemes": [
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "Beans is an intelligent news \u0026 blogs aggregation and search service that curates fresh content from RSS feeds using AI-powered natural language queries and filters.",
+        "title": "Beans API \u0026 MCP",
+        "contact": {},
+        "version": "0.1"
+    },
+    "paths": {
+        "/articles/latest": {
+            "get": {
+                "description": "Searches for the latest articles/news/blogs. For vector search (when `q` is provided), results are sorted by relevance; otherwise results are sorted by publication date (newest first).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Articles"
+                ],
+                "summary": "Get latest articles",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "search query (min length 3, max length 512)",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "description": "accuracy (0-1) used as cosine similarity threshold; higher values return fewer, more similar results",
+                        "name": "acc",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "kind filter (news, blog, etc.)",
+                        "name": "kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "tags (categories, regions, entities) to filter by",
+                        "name": "tags",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "sources/publisher ids to filter by",
+                        "name": "sources",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "format": "date",
+                        "description": "published since (YYYY-MM-DD)",
+                        "name": "published_since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "include content",
+                        "name": "with_content",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/beansack.Bean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "error message",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "error message",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/articles/trending": {
+            "get": {
+                "description": "Searches for trending articles/news/blogs. For vector search (when `q` is provided), results are sorted by relevance; otherwise they are sorted by an internal trend score computed from social engagement metrics (comments, likes, shares, last engagement, etc.).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Articles"
+                ],
+                "summary": "Get trending articles",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "search query (min length 3, max length 512)",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "description": "accuracy (0-1) used as cosine similarity threshold; higher values return fewer, more similar results",
+                        "name": "acc",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "kind filter (news, blog, etc.)",
+                        "name": "kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "tags (categories, regions, entities) to filter by",
+                        "name": "tags",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "sources/publisher ids to filter by",
+                        "name": "sources",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "format": "date",
+                        "description": "trending since (YYYY-MM-DD)",
+                        "name": "trending_since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "include content",
+                        "name": "with_content",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/beansack.Bean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "error message",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "error message",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "description": "Returns service health status",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Health"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/publishers": {
+            "get": {
+                "description": "Retrieves publisher metadata filtered by one or more publisher IDs.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Publishers"
+                ],
+                "summary": "Query publishers",
+                "parameters": [
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "sources/publisher ids to include",
+                        "name": "sources",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/beansack.Publisher"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "error message",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "error message",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/publishers/sources": {
+            "get": {
+                "description": "Retrieves a list of unique publisher IDs (paginated) from which articles are sourced.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Publishers"
+                ],
+                "summary": "List sources",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "error message",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/tags/categories": {
+            "get": {
+                "description": "Retrieves a list of unique values of article categories/topics (paginated), for example: Artificial Intelligence, Cybersecurity, Politics, Software Engineering, etc.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Tags"
+                ],
+                "summary": "List categories",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "error message",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/tags/entities": {
+            "get": {
+                "description": "Retrieves a list of unique named entities (paginated), such as people, organizations, and products mentioned in articles.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Tags"
+                ],
+                "summary": "List entities",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "error message",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/tags/regions": {
+            "get": {
+                "description": "Retrieves a list of unique geographic regions (paginated) mentioned in articles, e.g., UK, US, Europe.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Tags"
+                ],
+                "summary": "List regions",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "error message",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "beansack.Bean": {
+            "description": "Bean is the primary content model returned by article endpoints. Each Bean represents a news or blog article and includes metadata such as the `url`, `kind`, `source`, `title`, `summary` and optional full `content`, `author`, publish `created` date, and derived LLM fields (embedding vectors, `gist` highlights, `entities`, `regions`, `categories`, and `sentiments`).",
+            "type": "object",
+            "properties": {
+                "author": {
+                    "type": "string"
+                },
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "entities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "regions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "sentiments": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "source": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "beansack.Publisher": {
+            "description": "Publisher contains identifying and descriptive information about a publisher or content source: canonical `source` id, `base_url`, optional `site_name`, human-friendly `description`, `favicon` URL, and optional `rss_feed`. This model is used by publisher endpoints to return metadata for rendering or filtering.",
+            "type": "object",
+            "properties": {
+                "base_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "favicon": {
+                    "type": "string"
+                },
+                "site_name": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}

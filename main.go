@@ -8,14 +8,14 @@ import (
 
 	"github.com/joho/godotenv"
 	log "github.com/sirupsen/logrus"
-	bs "github.com/soumitsalman/gobeansack/beansack"
-	"github.com/soumitsalman/gobeansack/nlp"
-	r "github.com/soumitsalman/gobeansack/router"
+	bs "github.com/soumitsalman/beansapi/beansack"
+	_ "github.com/soumitsalman/beansapi/docs"
+	"github.com/soumitsalman/beansapi/nlp"
+	r "github.com/soumitsalman/beansapi/router"
 )
 
 const (
-	DEFAULT_PORT                = "8080"
-	DEFAULT_CONCURRENT_REQUESTS = "512"
+	DEFAULT_PORT = "8080"
 )
 
 func main() {
@@ -30,19 +30,18 @@ func main() {
 	defer db.Close()
 
 	// determine concurrency limit from environment
-	maxStr := getEnv("MAX_CONCURRENT_REQUESTS", DEFAULT_CONCURRENT_REQUESTS, false)
-	max, err := strconv.Atoi(maxStr)
-	var queue chan int
-	if err == nil && max > 0 {
-		queue = make(chan int, max)
+	maxStr := getEnv("MAX_CONCURRENT_REQUESTS", "", false)
+	max_requests, err := strconv.Atoi(maxStr)
+	if err != nil && max_requests < 0 {
+		max_requests = 0
 	}
 
-	api := r.NewRouter(&r.Configuration{
-		DB:       db,
-		Embedder: nlp.NewRemoteEmbedder(getEnv("EMBEDDER_BASE_URL", "", true), getEnv("EMBEDDER_API_KEY", "", false), getEnv("EMBEDDER_MODEL", "", false)),
-		APIKeys:  parseAPIKeys(os.Getenv("API_KEYS")),
-		Queue:    queue,
-	})
+	api := r.NewRouter(
+		db,
+		nlp.NewRemoteEmbedder(getEnv("EMBEDDER_BASE_URL", "", true), getEnv("EMBEDDER_API_KEY", "", false), getEnv("EMBEDDER_MODEL", "", false)),
+		parseAPIKeys(os.Getenv("API_KEYS")),
+		max_requests,
+	)
 
 	port := getEnv("PORT", DEFAULT_PORT, false)
 	addr := "0.0.0.0:" + port
