@@ -1,0 +1,7 @@
+properties:
+  template:
+    containers:
+      - name: main
+        image: docker.io/soumitsr/beans-api:${{ github.sha }}
+      - name: embedder
+        image: docker.io/soumitsr/tei-static:latest

@@ -42,7 +42,8 @@ jobs:
           registryPassword: ${{ secrets.CAFECITOBEANSAPI_REGISTRY_PASSWORD }}
           containerAppName: cafecito-beans-api
           resourceGroup: frontends-rg
-          imageToBuild: soumitsr/cafecito-beans-api:${{ github.sha }}
+          imageToBuild: soumitsr/beans-api:${{ github.sha }}
+          yamlConfigPath: .github/containerapp/containerapp.yaml
           _buildArgumentsKey_: |
             _buildArgumentsValues_
 
