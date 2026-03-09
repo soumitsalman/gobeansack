@@ -388,7 +388,7 @@ func createRequestLogger() gin.HandlerFunc {
 		if len(c.Errors) > 0 {
 			evt.Str("error", c.Errors.String())
 		}
-		evt.Msg("incoming")
+		evt.Msg("router")
 	}
 }
 

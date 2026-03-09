@@ -40,8 +40,21 @@ jobs:
               containers:
                 - name: main
                   image: docker.io/soumitsr/beans-api:${GITHUB_SHA}
+                  resources:
+                    cpu: 0.5                    
+                    memory: 1Gi
+                  env:
+                  - name: PG_CONNECTION_STRING
+                    secretRef: pg-connection-string
+                  - name: MAX_CONCURRENT_REQUESTS
+                    value: '512'
+                  - name: EMBEDDER_BASE_URL
+                    value: localhost:10000
                 - name: embedder
                   image: docker.io/soumitsr/tei-static:latest
+                  resources:
+                    cpu: 0.5                    
+                    memory: 1Gi
           EOF
 
       - name: Build and push container image to registry

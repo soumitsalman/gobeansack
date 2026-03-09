@@ -10,6 +10,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// TODO: add db logging
+
 // Logging and error handling utilities
 func NoError(err error, args ...any) {
 	if err != nil {
