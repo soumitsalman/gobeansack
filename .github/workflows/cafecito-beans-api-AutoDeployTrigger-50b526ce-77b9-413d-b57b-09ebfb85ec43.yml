@@ -31,6 +31,19 @@ jobs:
           tenant-id: ${{ secrets.CAFECITOBEANSAPI_AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.CAFECITOBEANSAPI_AZURE_SUBSCRIPTION_ID }}
 
+      - name: Render containerapp YAML
+        run: |
+          mkdir -p .github/containerapp
+          cat > .github/containerapp/containerapp.rendered.yaml <<EOF
+          properties:
+            template:
+              containers:
+                - name: main
+                  image: docker.io/soumitsr/beans-api:${GITHUB_SHA}
+                - name: embedder
+                  image: docker.io/soumitsr/tei-static:latest
+          EOF
+
       - name: Build and push container image to registry
         uses: azure/container-apps-deploy-action@v2
         with:
@@ -43,7 +56,7 @@ jobs:
           containerAppName: cafecito-beans-api
           resourceGroup: frontends-rg
           imageToBuild: soumitsr/beans-api:${{ github.sha }}
-          yamlConfigPath: .github/containerapp/containerapp.yaml
+          yamlConfigPath: .github/containerapp/containerapp.rendered.yaml
           _buildArgumentsKey_: |
             _buildArgumentsValues_
 
