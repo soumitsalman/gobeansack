@@ -16,6 +16,7 @@ WORKDIR /app
 COPY --from=builder /app/beansapi .
 
 ENV PORT=8080
+ENV GIN_MODE=release
 
 EXPOSE 8080
 

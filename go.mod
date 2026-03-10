@@ -74,7 +74,6 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/rs/zerolog v1.34.0
-	github.com/sirupsen/logrus v1.9.3
 	github.com/soumitsalman/data-utils v0.0.0-20240411181743-1067a6fce2ca
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/files v1.0.1

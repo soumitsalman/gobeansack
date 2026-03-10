@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -38,7 +38,7 @@ func NewRemoteEmbedder(baseURL, apiKey, model string) *RemoteEmbedder {
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		log.WithError(err).Fatal("failed to connect to TEI gRPC server")
+		log.Error().Str("module", "EMBEDDER").Err(err).Msg("failed to connect to TEI gRPC server")
 	}
 
 	return &RemoteEmbedder{
@@ -56,12 +56,12 @@ func (e *RemoteEmbedder) EmbedQuery(ctx context.Context, query string) []float32
 		Inputs: query,
 	})
 	if err != nil {
-		log.WithError(err).Error("failed to embed query")
+		log.Error().Str("module", "EMBEDDER").Err(err).Msg("failed to embed query")
 		return nil
 	}
 
 	if len(resp.Embeddings) == 0 {
-		log.Error("empty embedding response from TEI")
+		log.Error().Str("module", "EMBEDDER").Msg("empty embedding response from TEI")
 		return nil
 	}
 

@@ -9,7 +9,6 @@
 package router
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -25,6 +24,7 @@ import (
 )
 
 const (
+	DEFAULT_WINDOW      = 7 // DAYS
 	DEFAULT_ACCURACY    = 0.75
 	DEFAULT_LIMIT       = 16
 	MAX_LIMIT           = 128
@@ -91,7 +91,7 @@ func (r *Configuration) health(c *gin.Context) {
 func validateTagsParams(c *gin.Context) {
 	var input TagsInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.AbortWithError(http.StatusInternalServerError, err)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.Set("req_params", input)
@@ -150,7 +150,7 @@ func (r *Configuration) getRegions(c *gin.Context) {
 func validatePublishersParams(c *gin.Context) {
 	var input PublishersInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.AbortWithError(http.StatusBadRequest, err)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.Set("req_params", input)
@@ -191,7 +191,7 @@ func (r *Configuration) getPublishers(c *gin.Context) {
 	conditions := c.MustGet("req_conditions").(bs.Condition)
 	page := c.MustGet("req_page").(bs.Pagination)
 	if len(conditions.Sources) == 0 {
-		c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("source parameter required"))
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: sources"})
 		return
 	}
 	items, err := r.DB.QueryPublishers(c.Request.Context(), conditions, page, []string{bs.CORE_PUBLISHER_FIELDS})
@@ -201,7 +201,7 @@ func (r *Configuration) getPublishers(c *gin.Context) {
 func (config *Configuration) validateArticlesParams(c *gin.Context) {
 	var input ArticlesInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.AbortWithError(http.StatusBadRequest, err)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	conditions := bs.Condition{
@@ -219,13 +219,13 @@ func (config *Configuration) validateArticlesParams(c *gin.Context) {
 		conditions.Distance = 1 - input.Acc
 		conditions.Embedding = config.Embedder.EmbedQuery(c, input.Q)
 		if len(conditions.Embedding) == 0 {
-			c.AbortWithError(http.StatusInternalServerError, fmt.Errorf(_EMBEDDER_ERROR))
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": _EMBEDDER_ERROR})
 			return
 		}
 	}
 	columns := []string{bs.CORE_BEAN_FIELDS}
 	if input.WithContent {
-		columns = []string{bs.K_CONTENT}
+		columns = append(columns, bs.K_CONTENT)
 	}
 	c.Set("req_params", input)
 	c.Set("req_conditions", conditions)
@@ -258,7 +258,7 @@ func (r *Configuration) getLatestArticles(c *gin.Context) {
 	page := c.MustGet("req_page").(bs.Pagination)
 	columns := c.MustGet("req_columns").([]string)
 	if conditions.Created.IsZero() {
-		conditions.Created = time.Now().AddDate(0, 0, -7) // default to last 7 days if no published filter provided
+		conditions.Created = time.Now().AddDate(0, 0, -DEFAULT_WINDOW) // default to last 7 days if no published filter provided
 	}
 	items, err := r.DB.QueryLatestBeans(c.Request.Context(), conditions, page, columns)
 	returnResponse(c, items, err)
@@ -288,7 +288,7 @@ func (r *Configuration) getTrendingArticles(c *gin.Context) {
 	page := c.MustGet("req_page").(bs.Pagination)
 	columns := c.MustGet("req_columns").([]string)
 	if conditions.Updated.IsZero() {
-		conditions.Updated = time.Now().AddDate(0, 0, -7) // default to last 7 days if no trending filter provided
+		conditions.Updated = time.Now().AddDate(0, 0, -DEFAULT_WINDOW) // default to last 7 days if no trending filter provided
 	}
 	items, err := r.DB.QueryTrendingBeans(c.Request.Context(), conditions, page, append(columns, bs.K_TRENDSCORE))
 	returnResponse(c, items, err)
@@ -352,7 +352,7 @@ func (r *Configuration) apiKeyMiddleware(c *gin.Context) {
 			return
 		}
 	}
-	c.AbortWithError(http.StatusUnauthorized, fmt.Errorf("Missing API Key"))
+	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Missing API Key"})
 }
 
 func (r *Configuration) concurrencyMiddleware(c *gin.Context) {
@@ -392,7 +392,7 @@ func requestLogger(c *gin.Context) {
 
 func returnResponse[T any](c *gin.Context, items []T, err error) {
 	if err != nil {
-		c.AbortWithError(http.StatusInternalServerError, fmt.Errorf(_DB_ERROR))
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": _DB_ERROR})
 		return
 	}
 	if len(items) == 0 {
