@@ -231,10 +231,10 @@ func validatePublishersParams(c *gin.Context) {
 func (r *Configuration) getPublishers(c *gin.Context) {
 	conditions := c.MustGet("req_conditions").(bs.Condition)
 	page := c.MustGet("req_page").(bs.Pagination)
-	if len(conditions.Sources) == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: sources"})
-		return
-	}
+	// if len(conditions.Sources) == 0 {
+	// 	c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: sources"})
+	// 	return
+	// }
 	items, err := r.DB.QueryPublishers(c.Request.Context(), conditions, page, []string{bs.CORE_PUBLISHER_FIELDS})
 	returnResponse(c, items, err)
 }
