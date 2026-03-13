@@ -196,7 +196,7 @@
                 "tags": [
                     "Articles"
                 ],
-                "summary": "Semantic/tag-based article search",
+                "summary": "Search articles",
                 "parameters": [
                     {
                         "type": "string",
@@ -393,7 +393,7 @@
                     {
                         "type": "string",
                         "description": "content type filter (news, blog, post, etc.)",
-                        "name": "kind",
+                        "name": "content_type",
                         "in": "query"
                     },
                     {
@@ -553,7 +553,7 @@
                     {
                         "type": "string",
                         "description": "content type filter (news, blog, post, etc.)",
-                        "name": "kind",
+                        "name": "content_type",
                         "in": "query"
                     },
                     {
@@ -1018,87 +1018,107 @@
             "type": "object",
             "properties": {
                 "author": {
+                    "description": "Author is the byline or attributed creator when available from the source.",
                     "type": "string"
                 },
                 "categories": {
+                    "description": "Categories lists the inferred topics assigned to the content.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "cluster_id": {
+                    "description": "ClusterId identifies the related-content cluster containing this Bean.",
                     "type": "string"
                 },
                 "comments": {
+                    "description": "Comments is the aggregate number of replies or comments associated with this Bean.",
                     "type": "integer"
                 },
                 "content": {
+                    "description": "Content is the full body text when the source content is available.",
                     "type": "string"
                 },
                 "content_type": {
+                    "description": "Kind is the content type, for example news, blog, post, generated, or comment.",
                     "type": "string"
                 },
                 "entities": {
+                    "description": "Entities lists named entities such as people, places, organizations, or products.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "image_url": {
+                    "description": "ImageUrl is the featured image or preview image associated with the content.",
                     "type": "string"
                 },
                 "likes": {
-                    "description": "Aggregated social metrics",
+                    "description": "Likes is the aggregate number of likes or upvotes associated with this Bean.",
                     "type": "integer"
                 },
                 "num_related": {
+                    "description": "ClusterSize is the total number of Beans in the same related-content cluster.",
                     "type": "integer"
                 },
                 "publish_date": {
+                    "description": "Created is the original publish timestamp of the article or post.",
                     "type": "string",
                     "format": "date-time"
                 },
                 "regions": {
+                    "description": "Regions lists geographic regions mentioned in or associated with the content.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "related": {
+                    "description": "Related lists URLs of semantically or editorially related Beans.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "sentiments": {
+                    "description": "Sentiments lists inferred tones or sentiments expressed in the content.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "shares": {
+                    "description": "Shares is the aggregate number of reposts or share-like actions associated with this Bean.",
                     "type": "integer"
                 },
                 "source": {
+                    "description": "Source is the canonical publisher identifier and matches Publisher.Source.",
                     "type": "string"
                 },
                 "source_base_url": {
-                    "description": "Publisher display fields",
+                    "description": "BaseURL is the publisher's primary site URL copied onto aggregate results for convenience.",
                     "type": "string"
                 },
                 "source_description": {
+                    "description": "Description is the publisher description copied onto aggregate results.",
                     "type": "string"
                 },
                 "source_favicon": {
+                    "description": "Favicon is the publisher favicon URL copied onto aggregate results.",
                     "type": "string"
                 },
                 "source_site_name": {
+                    "description": "SiteName is the human-readable name of the publisher copied onto aggregate results.",
                     "type": "string"
                 },
                 "subscribers": {
+                    "description": "Subscribers is the aggregate audience size associated with this Bean's chatter.",
                     "type": "integer"
                 },
                 "summary": {
+                    "description": "Summary is a short abstract or teaser used in listings and previews.",
                     "type": "string"
                 },
                 "tags": {
@@ -1109,12 +1129,15 @@
                     }
                 },
                 "title": {
+                    "description": "Title is the human-readable headline or title of the content.",
                     "type": "string"
                 },
                 "trend_score": {
+                    "description": "TrendScore is the computed ranking score used to order trending results.",
                     "type": "number"
                 },
                 "url": {
+                    "description": "URL is the canonical URL of the article or post.",
                     "type": "string"
                 }
             }
@@ -1124,18 +1147,23 @@
             "type": "object",
             "properties": {
                 "source": {
+                    "description": "Source is the canonical publisher identifier and matches Bean.Source values.",
                     "type": "string"
                 },
                 "source_base_url": {
+                    "description": "BaseURL is the publisher's primary site URL.",
                     "type": "string"
                 },
                 "source_description": {
+                    "description": "Description is a short description of the publisher or content source.",
                     "type": "string"
                 },
                 "source_favicon": {
+                    "description": "Favicon is the URL of the publisher favicon or brand icon.",
                     "type": "string"
                 },
                 "source_site_name": {
+                    "description": "SiteName is the human-readable display name of the publisher.",
                     "type": "string"
                 }
             }

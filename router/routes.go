@@ -280,7 +280,7 @@ func (config *Configuration) validateArticlesParams(c *gin.Context) {
 }
 
 // searchArticles godoc
-// @Summary Semantic/tag-based article search
+// @Summary Search articles
 // @Description Perform semantic (vector embedding) or tag-based search across all articles in the database.
 // Results return full article details with publisher info, engagement metrics, and computed trends.
 // At least ONE of: `q`, `tags`, `categories`, `regions`, `entities`, or `urls` is required.
@@ -395,7 +395,7 @@ func (r *Configuration) getLatestArticles(c *gin.Context) {
 // @Produce json
 // @Param q query string false "optional semantic search query (character length 3-512)"
 // @Param acc query number false "embedding accuracy/similarity threshold (0.0-1.0, higher = stricter)" default(0.75) minimum(0) maximum(1)
-// @Param kind query string false "content type filter (news, blog, post, etc.)"
+// @Param content_type query string false "content type filter (news, blog, post, etc.)"
 // @Param tags query []string false "case/whitespace-insensitive text search across categories, regions, entities (recommended)" collectionFormat(csv)
 // @Param categories query []string false "precise category filters (inclusive OR, case/whitespace-sensitive)" collectionFormat(csv)
 // @Param regions query []string false "precise region filters (inclusive OR, case/whitespace-sensitive)" collectionFormat(csv)
@@ -438,7 +438,7 @@ func (r *Configuration) getTrendingArticles(c *gin.Context) {
 // @Produce json
 // @Param q query string false "optional semantic search query (character length 3-512)"
 // @Param acc query number false "embedding accuracy/similarity threshold (0.0-1.0)" default(0.75) minimum(0) maximum(1)
-// @Param kind query string false "content type filter (news, blog, post, etc.)"
+// @Param content_type query string false "content type filter (news, blog, post, etc.)"
 // @Param tags query []string false "case/whitespace-insensitive text search across categories, regions, entities (recommended)" collectionFormat(csv)
 // @Param categories query []string false "precise category filters (inclusive OR, case/whitespace-sensitive)" collectionFormat(csv)
 // @Param regions query []string false "precise region filters (inclusive OR, case/whitespace-sensitive)" collectionFormat(csv)
